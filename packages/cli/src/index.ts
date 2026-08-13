@@ -162,15 +162,14 @@ async function inboxItems(config: RepoRecallConfig, limit: number): Promise<Inbo
     .slice(0, limit);
 }
 
-function mcpRuntime(config: RepoRecallConfig): {
+export function createMcpRuntime(config: RepoRecallConfig): {
   runtime: MemoryMcpRuntime;
   index: SqliteMemoryIndex;
   close: () => void;
 } {
-  const projectStore = new FileMemoryStore({ root: config.projectMemoryDir, scope: 'project' });
-  const globalStore = new FileMemoryStore({ root: config.brainPath, scope: 'global' });
-  const sessionStore = new FileMemoryStore({ root: config.projectMemoryDir, scope: 'session' });
-  const index = new SqliteMemoryIndex({ path: config.indexPath });
+  const processing = createProcessingRuntime(config);
+  const { global: globalStore, project: projectStore, session: sessionStore } = processing.stores;
+  const index = processing.index;
   const contextBuilder = new DeterministicContextBuilder(index);
   const runtime: MemoryMcpRuntime = {
     store: projectStore,
@@ -181,9 +180,10 @@ function mcpRuntime(config: RepoRecallConfig): {
       const root = record.scope === 'global' ? config.brainPath : config.projectMemoryDir;
       await index.update([memoryPath(root, record.id, record.scope)]);
     },
-    listInbox: (limit) => inboxItems(config, limit),
+    listInbox: (limit) => processing.inbox.list({ status: 'pending', limit }),
+    processCapture: (capture, options) => processing.processCapture(capture, options),
   };
-  return { runtime, index, close: () => index.close() };
+  return { runtime, index, close: () => processing.close() };
 }
 
 function storeFor(
@@ -465,7 +465,7 @@ async function doctorCommand(context: CommandContext, flags: ParsedArgs['flags']
 
 async function mcpCommand(context: CommandContext, flags: ParsedArgs['flags']): Promise<number> {
   const config = await getConfig(context, flags);
-  const configured = mcpRuntime(config);
+  const configured = createMcpRuntime(config);
   try {
     await configured.index.rebuild(rootsFor(config));
     await runMcpStdio(configured.runtime);
