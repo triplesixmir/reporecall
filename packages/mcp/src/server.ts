@@ -7,8 +7,13 @@ import {
   MEMORY_SCOPES,
   MEMORY_STATUSES,
   MEMORY_TYPES,
+  createMemoryInputSchema,
   memoryTagSchema,
+  memorySourceSchema,
   redactSecrets,
+  redactedSessionCaptureSchema,
+  type ProcessedCaptureResult,
+  type RedactedSessionCapture,
   type ContextBuilder,
   type ContextRequest,
   type CreateMemoryInput,
@@ -25,6 +30,7 @@ import {
 export const REPORECALL_MCP_INSTRUCTIONS = [
   'RepoRecall is a local-first memory layer. Canonical Markdown files with YAML frontmatter are the durable source of truth; SQLite is only a disposable local index.',
   'Use memory_remember and memory_update for explicit durable writes. memory_checkpoint is the only tool that creates a durable session event; session hooks never summarize transcripts automatically.',
+  'memory_process accepts only an explicitly supplied redacted capture. It never reads or stores raw transcripts; automatic persistence requires an explicit allowAutomatic request and conservative mode sends processor suggestions to Inbox.',
   'Never write secrets, credentials, private keys, or raw transcripts. User-owned tags are preserved when an agent updates a memory.',
 ].join(' ');
 
@@ -39,6 +45,10 @@ export type MemoryMcpRuntime = {
   contextBuilder: ContextBuilder;
   afterWrite?: (record: MemoryRecord, operation: MemoryWriteOperation) => Promise<void>;
   listInbox?: (limit: number) => Promise<InboxItem[]>;
+  processCapture?: (
+    capture: RedactedSessionCapture,
+    options: { allowAutomatic: boolean },
+  ) => Promise<ProcessedCaptureResult>;
 };
 
 type ProjectArguments = {
@@ -123,6 +133,18 @@ const inboxInputSchema = {
   limit: z.number().int().min(1).max(1000).default(50),
 };
 
+const processInputSchema = {
+  content: z.string().min(1),
+  capturedAt: z.iso.datetime({ offset: true }).optional(),
+  sessionId: z.string().min(1).optional(),
+  source: memorySourceSchema.optional(),
+  explicit: z.array(createMemoryInputSchema).optional(),
+  ...projectFields,
+  workspaceId: z.string().min(1).optional(),
+  workspaceName: z.string().min(1).optional(),
+  allowAutomatic: z.boolean().default(false),
+};
+
 function success<T extends Record<string, unknown>>(data: T, summary: string): CallToolResult {
   return {
     structuredContent: data,
@@ -191,6 +213,18 @@ async function listAll(
 
 function contextProject(arguments_: ProjectArguments): ContextRequest['project'] {
   return projectRef(arguments_);
+}
+
+function captureWorkspace(arguments_: {
+  workspaceId?: string | undefined;
+  workspaceName?: string | undefined;
+}): RedactedSessionCapture['workspace'] {
+  if (arguments_.workspaceId === undefined && arguments_.workspaceName === undefined)
+    return undefined;
+  return {
+    id: arguments_.workspaceId ?? arguments_.workspaceName ?? 'workspace',
+    ...(arguments_.workspaceName === undefined ? {} : { name: arguments_.workspaceName }),
+  };
 }
 
 async function writeRecord(
@@ -291,6 +325,47 @@ export function createMemoryMcpServer(runtime: MemoryMcpRuntime): McpServer {
       return success(
         { records, count: records.length },
         `Returned ${records.length} recent memor${records.length === 1 ? 'y' : 'ies'}.`,
+      );
+    },
+  );
+
+  server.registerTool(
+    'memory_process',
+    {
+      title: 'Process an explicit capture',
+      description:
+        'Process an explicitly supplied redacted capture; this never reads or stores a raw transcript.',
+      inputSchema: processInputSchema,
+    },
+    async (arguments_) => {
+      if (runtime.processCapture === undefined) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: 'text',
+              text: 'Memory processing is unavailable in this runtime.',
+            },
+          ],
+        };
+      }
+      const project = projectRef(arguments_);
+      const workspace = captureWorkspace(arguments_);
+      const capture = redactedSessionCaptureSchema.parse({
+        content: arguments_.content,
+        ...(arguments_.capturedAt === undefined ? {} : { capturedAt: arguments_.capturedAt }),
+        ...(arguments_.sessionId === undefined ? {} : { sessionId: arguments_.sessionId }),
+        ...(arguments_.source === undefined ? {} : { source: arguments_.source }),
+        ...(arguments_.explicit === undefined ? {} : { explicit: arguments_.explicit }),
+        ...(project === undefined ? {} : { project }),
+        ...(workspace === undefined ? {} : { workspace }),
+      }) as RedactedSessionCapture;
+      const result = await runtime.processCapture(capture, {
+        allowAutomatic: arguments_.allowAutomatic,
+      });
+      return success(
+        result,
+        `Processed with ${result.provider} (${result.mode}): ${result.durable.length} durable, ${result.inbox.length} Inbox, ${result.duplicates.length} duplicates.`,
       );
     },
   );

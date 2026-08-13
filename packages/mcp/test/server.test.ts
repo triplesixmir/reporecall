@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { afterEach, describe, expect, test } from 'vitest';
+import type { ProcessedCaptureResult, RedactedSessionCapture } from '@reporecall/core';
 import { DeterministicContextBuilder } from '@reporecall/context';
 import { SqliteMemoryIndex } from '@reporecall/index';
 import { FileMemoryStore } from '@reporecall/storage';
@@ -69,6 +70,7 @@ describe('RepoRecall MCP server', () => {
         'memory_checkpoint',
         'memory_get_context',
         'memory_get_recent',
+        'memory_process',
         'memory_remember',
         'memory_resolve',
         'memory_review_inbox',
@@ -208,6 +210,67 @@ describe('RepoRecall MCP server', () => {
       expect(result.structuredContent).toEqual({ records: [], count: 0 });
       expect(await connection.runtime.store.list()).toHaveLength(0);
       await expect(readFile(join(connection.root, 'sessions', 'session.md'), 'utf8')).rejects.toThrow();
+    } finally {
+      await connection.close();
+    }
+  });
+
+  test('processes an explicit capture through the configured callback', async () => {
+    const connection = await connectedRuntime();
+    try {
+      let receivedCapture: RedactedSessionCapture | undefined;
+      let receivedOptions: { allowAutomatic: boolean } | undefined;
+      const processed: ProcessedCaptureResult = {
+        durable: [],
+        inbox: [],
+        duplicates: [],
+        warnings: [],
+        provider: 'agent-native',
+        mode: 'conservative',
+      };
+      connection.runtime.processCapture = (capture, options) => {
+        receivedCapture = capture;
+        receivedOptions = options;
+        return Promise.resolve(processed);
+      };
+
+      const result = await connection.client.callTool({
+        name: 'memory_process',
+        arguments: {
+          content: 'Decision: keep this explicit.',
+          projectId: 'demo-project',
+          projectRoot: connection.project,
+          projectName: 'Demo project',
+          allowAutomatic: true,
+        },
+      });
+
+      expect(result.isError).not.toBe(true);
+      expect(result.structuredContent).toEqual(processed);
+      expect(result.content[0]).toMatchObject({ type: 'text' });
+      expect((result.content[0] as { text: string }).text).toMatch(/1?0 durable.*Inbox/i);
+      expect(receivedCapture).toMatchObject({
+        content: 'Decision: keep this explicit.',
+        project: { id: 'demo-project', root: connection.project, name: 'Demo project' },
+      });
+      expect(receivedOptions).toEqual({ allowAutomatic: true });
+    } finally {
+      await connection.close();
+    }
+  });
+
+  test('reports processing unavailable when the runtime has no callback', async () => {
+    const connection = await connectedRuntime();
+    try {
+      const result = await connection.client.callTool({
+        name: 'memory_process',
+        arguments: { content: 'This must not be stored implicitly.' },
+      });
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0]).toMatchObject({ type: 'text' });
+      expect((result.content[0] as { text: string }).text).toMatch(/processing.*unavailable/i);
+      expect(await connection.runtime.store.list()).toHaveLength(0);
     } finally {
       await connection.close();
     }
