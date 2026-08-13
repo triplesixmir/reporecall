@@ -164,6 +164,17 @@ export type SearchResult = {
   score: number;
 };
 
+export type IndexError = {
+  path: string;
+  message: string;
+};
+
+export type MemoryIndex = {
+  rebuild(sources: MemorySourceRoot[]): Promise<RebuildReport>;
+  update(paths: string[]): Promise<IndexReport>;
+  search(request: SearchRequest): Promise<SearchResult[]>;
+};
+
 export type ContextRequest = {
   project?: ProjectRef;
   workspace?: WorkspaceRef;
@@ -184,6 +195,10 @@ export type ContextBundle = {
   text: string;
   estimatedTokens: number;
   omittedCount: number;
+};
+
+export type ContextBuilder = {
+  build(request: ContextRequest): Promise<ContextBundle>;
 };
 
 export type MemorySourceRoot = {
