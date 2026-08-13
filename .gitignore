@@ -1,0 +1,25 @@
+node_modules/
+dist/
+coverage/
+playwright-report/
+test-results/
+.DS_Store
+*.log
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+.reporecall/index/
+.reporecall/cache/
+.reporecall/*.sqlite
+.reporecall/*.sqlite-*
+.reporecall/runtime/
+*.sqlite
+*.sqlite-*
+
+# Local development memory must never enter the public repository.
+brain/
+.reporecall/memories/
+.reporecall/inbox/
+.reporecall/sessions/
+.pnpm-store/

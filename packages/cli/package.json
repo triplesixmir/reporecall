@@ -1,0 +1,28 @@
+{
+  "name": "reporecall",
+  "version": "0.1.0",
+  "description": "Persistent, local-first memory for AI agents.",
+  "type": "module",
+  "bin": { "reporecall": "dist/bin.js" },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": { ".": "./dist/index.js" },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@reporecall/context": "workspace:*",
+    "@reporecall/core": "workspace:*",
+    "@reporecall/index": "workspace:*",
+    "@reporecall/integrations": "workspace:*",
+    "@reporecall/mcp": "workspace:*",
+    "@reporecall/processors": "workspace:*",
+    "@reporecall/storage": "workspace:*",
+    "@inquirer/prompts": "^7.8.0",
+    "cac": "^6.7.14",
+    "hono": "^4.12.32",
+    "@hono/node-server": "^2.0.12"
+  }
+}

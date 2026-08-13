@@ -1,0 +1,17 @@
+{
+  "name": "@reporecall/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@reporecall/core": "workspace:*",
+    "@vitejs/plugin-react": "^5.0.4",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": { "vite": "^8.2.0" }
+}

@@ -1,0 +1,18 @@
+{
+  "name": "@reporecall/core",
+  "version": "0.1.0",
+  "description": "Versioned memory contracts and deterministic domain utilities.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": { ".": "./dist/index.js" },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "yaml": "^2.8.1",
+    "zod": "^4.1.12"
+  }
+}

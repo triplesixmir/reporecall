@@ -1,0 +1,14 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/core" },
+    { "path": "packages/storage" },
+    { "path": "packages/index" },
+    { "path": "packages/context" },
+    { "path": "packages/integrations" },
+    { "path": "packages/processors" },
+    { "path": "packages/mcp" },
+    { "path": "packages/cli" },
+    { "path": "apps/web" }
+  ]
+}
