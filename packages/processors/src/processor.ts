@@ -182,6 +182,9 @@ export class ConsolidatingMemoryProcessor implements MemoryProcessor {
         warnings: ['Processor refused a session capture containing only a secret or credential.'],
       };
     }
+    if (captureScan.redacted !== capture.content) {
+      warnings.push('Processor redacted one or more secrets before provider processing.');
+    }
     const safeCapture =
       captureScan.redacted === capture.content
         ? capture
