@@ -333,6 +333,11 @@ export type ProcessorResult = {
   warnings: string[];
 };
 
+export type ProcessedCaptureResult = ProcessorResult & {
+  provider: ProcessorKind;
+  mode: ProcessorMode;
+};
+
 export interface MemoryProcessor {
   process(capture: RedactedSessionCapture): Promise<ProcessorResult>;
 }

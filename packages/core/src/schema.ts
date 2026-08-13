@@ -81,6 +81,18 @@ export const createMemoryInputSchema = z
   })
   .strict();
 
+export const redactedSessionCaptureSchema = z
+  .object({
+    content: z.string().trim().min(1),
+    capturedAt: isoDate.optional(),
+    sessionId: nonEmptyString.optional(),
+    project: projectRefSchema.optional(),
+    workspace: workspaceRefSchema.optional(),
+    source: memorySourceSchema.optional(),
+    explicit: z.array(createMemoryInputSchema).optional(),
+  })
+  .strict();
+
 export const memoryRecordSchema = z
   .object({
     schema: z.literal(MEMORY_SCHEMA_VERSION),
