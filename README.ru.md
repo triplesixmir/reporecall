@@ -159,14 +159,14 @@ Private global memories не должны попадать в public repositorie
 | Репозиторий | Visibility | Содержимое |
 | ----------- | ---------- | ---------- |
 | `triplesixmir/reporecall` | public | source, tests, CI, bilingual documentation |
-| `triplesixmir/reporecall-private-memory` | private | ваш Markdown brain и safe RepoRecall config |
+| `YOUR_GITHUB_USER/reporecall-private-memory` | private | ваш Markdown brain и safe RepoRecall config |
 
 На новом Windows-компьютере сначала клонируйте private brain, затем подключите
 его к проекту:
 
 ```powershell
 $Brain = Join-Path $env:USERPROFILE ".reporecall\brain"
-git clone git@github.com:triplesixmir/reporecall-private-memory.git $Brain
+git clone git@github.com:YOUR_GITHUB_USER/reporecall-private-memory.git $Brain
 reporecall brain init --brain $Brain
 cd C:\path\to\your-project
 reporecall init --yes --brain $Brain
