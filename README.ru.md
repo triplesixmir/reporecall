@@ -17,7 +17,7 @@ RepoRecall — локальный, независимый от модели сл
 - Детерминированная сборка контекста с приоритетом pinned/project-current и token budget.
 - Безопасные CLI-команды для init, remember, search, Inbox, checkpoint, rebuild, doctor и serve.
 - Loopback Hono API и React/Vite workbench.
-- Stdio MCP tools для context, search, recent, durable writes, resolve, checkpoint и Inbox.
+- Stdio MCP tools для context, search, recent, durable writes, resolve, checkpoint, explicit processing и Inbox.
 - Codex adapter для MCP, managed `AGENTS.md` и hooks `SessionStart`, `PostCompact`, `SessionEnd`.
 - Опциональные processors: `agent-native`, Ollama, OpenRouter и OpenAI-compatible HTTP providers.
 - Secret scanner и redaction до записи в durable storage.
@@ -98,6 +98,7 @@ reporecall brain init           инициализировать custom global b
 reporecall status               проверить files и health индекса
 reporecall doctor               проверить runtime и storage
 reporecall remember <text>      создать явную durable memory
+reporecall process --content    обработать явный redacted capture
 reporecall search <query>       искать в локальном SQLite index
 reporecall inbox                показать processor suggestions
 reporecall rebuild              пересобрать SQLite из Markdown
@@ -125,6 +126,12 @@ durable record через `memory_remember` или `reporecall remember`; durabl
 сессии появляется только после явного checkpoint. По умолчанию processor отключён
 ради privacy. Если нужны suggestions, processor включается отдельно и пишет их
 в Inbox.
+
+Явную capture можно обработать через `reporecall process --content "..."` или
+передать JSON в stdin с флагом `--json`. Provider получает только redacted
+content; в `conservative` mode suggestions попадают в Inbox. Для конкретного
+запуска `automatic` нужен явный `--allow-automatic`. Сама capture временная и
+никогда не сохраняется как session transcript.
 
 ## Privacy и processors
 

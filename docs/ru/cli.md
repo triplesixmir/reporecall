@@ -9,6 +9,7 @@
 | `status`     | Проверить canonical files и index errors.                      |
 | `doctor`     | Проверить Node.js version, storage и index health.             |
 | `remember`   | Записать explicit durable memory после redaction.              |
+| `process`    | Обработать явно переданную redacted capture.                   |
 | `search`     | Искать в SQLite index.                                         |
 | `inbox`      | Показать pending processor suggestions.                        |
 | `rebuild`    | Пересоздать disposable index из Markdown.                      |
@@ -21,6 +22,34 @@
 | `codex-hook` | Обработать `SessionStart`, `PostCompact` или `SessionEnd`.     |
 
 В checkout используйте `pnpm exec tsx packages/cli/src/bin.ts`. После build — `node packages/cli/dist/bin.js`.
+
+## Явный processor workflow
+
+Обработайте явно переданную capture через локальный marker provider:
+
+```bash
+reporecall process \
+  --processor agent-native \
+  --content "Decision: keep Markdown canonical."
+```
+
+Для structured input передайте JSON с `content` и optional-полями
+`capturedAt`, `sessionId`, `project`, `workspace` и `explicit`:
+
+```bash
+reporecall process --processor agent-native --json < capture.json
+```
+
+Capture проверяется локально до provider invocation. В `conservative` mode
+provider suggestions записываются в Markdown Inbox; `balanced` может сохранить
+high-confidence suggestions; `automatic` требует и настройки automatic mode,
+и флага `--allow-automatic` для конкретного запуска. Explicit items становятся
+durable по своему scope. Raw capture не записывается в `sessions/`, hooks не
+вызывают эту команду неявно.
+
+Можно выбрать `ollama`, `openrouter` или `openai-compatible`. Credentials
+остаются в environment variables. `--json` возвращает durable records, Inbox,
+duplicates, warnings, provider и mode.
 
 ## Configuration
 
@@ -42,7 +71,7 @@ Relative paths разрешаются относительно config file, ко
 
 - `0`: операция завершилась успешно.
 - `1`: ошибка команды или validation failure.
-- `2`: memory write отклонён из-за empty или secret-only content.
+- `2`: memory write или processor capture отклонены из-за empty или secret-only content.
 
 `serve` даёт понятную ошибку, если hostname или port недоступны. `codex-hook` fail-open и возвращает `0`, сообщая об ошибке в stderr.
 

@@ -9,6 +9,7 @@ RepoRecall local-first, но local не означает автоматичес�
 - Explicit session checkpoints — Markdown session events.
 - Session captures для processors redacted и временные; raw transcript не является durable source.
 - SQLite содержит derived index и может быть удалён.
+- Явный вызов `reporecall process` или `memory_process` может создать Inbox suggestions или durable records, но переданная capture не сохраняется как transcript.
 
 ## Secret scanning
 
@@ -29,6 +30,7 @@ RepoRecall local-first, но local не означает автоматичес�
 5. Настраивайте ignored paths для директорий, которые нельзя watch/import.
 6. Оставляйте processor output в Inbox в `conservative` mode.
 7. Не помещайте raw transcripts и credentials в checkpoint content.
+8. Считайте `memory_process` и `reporecall process` явными операциями; Codex hooks только получают context и не отправляют captures автоматически.
 
 Project `memories/`, accepted Inbox records и explicit session checkpoints — canonical Markdown и автоматически не игнорируются. Commit-ьте только records, предназначенные для repository; для sensitive context используйте private remote.
 

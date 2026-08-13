@@ -9,6 +9,7 @@
 | `status`     | Validate canonical files and report index errors.                |
 | `doctor`     | Check Node.js version and storage/index health.                  |
 | `remember`   | Write an explicit durable memory after redaction.                |
+| `process`    | Process an explicitly supplied redacted capture.                |
 | `search`     | Search the SQLite index.                                         |
 | `inbox`      | Print pending processor suggestions.                             |
 | `rebuild`    | Recreate the disposable index from Markdown.                     |
@@ -21,6 +22,35 @@
 | `codex-hook` | Handle a `SessionStart`, `PostCompact`, or `SessionEnd` event.   |
 
 The source checkout can run commands with `pnpm exec tsx packages/cli/src/bin.ts`. A built checkout can use `node packages/cli/dist/bin.js`.
+
+## Explicit processor workflow
+
+Process a deliberately supplied capture with the local marker provider:
+
+```bash
+reporecall process \
+  --processor agent-native \
+  --content "Decision: keep Markdown canonical."
+```
+
+For structured input, pipe a JSON object containing `content` and optional
+`capturedAt`, `sessionId`, `project`, `workspace`, and `explicit` fields:
+
+```bash
+reporecall process --processor agent-native --json < capture.json
+```
+
+The capture is scanned locally before provider invocation. In `conservative`
+mode provider suggestions are written to the Markdown Inbox; `balanced` may
+persist high-confidence suggestions; `automatic` requires both configured
+automatic mode and the per-invocation `--allow-automatic` flag. Explicit items
+in the capture are durable according to their declared scope. The raw capture
+is not written to `sessions/` and hooks do not call this command implicitly.
+
+Use `--processor ollama`, `--processor openrouter`, or
+`--processor openai-compatible` for the existing HTTP providers. Credentials
+remain environment variables. `--json` returns durable records, Inbox items,
+duplicates, warnings, provider, and mode.
 
 ## Configuration
 
@@ -42,7 +72,7 @@ Paths are resolved relative to the file that declares them. `~` expands against 
 
 - `0`: operation completed successfully.
 - `1`: command or validation failure.
-- `2`: a requested memory write was refused because content was empty or secret-only.
+- `2`: a requested memory write or processor capture was refused because content was empty or secret-only.
 
 `serve` reports a friendly bind error when the port or hostname is unavailable. `codex-hook` is fail-open and returns `0` after reporting hook failures to stderr.
 

@@ -17,7 +17,7 @@ The important boundary is simple: Markdown is the source of truth. SQLite can be
 - Deterministic context selection with pinned/project-current boosts and token budgets.
 - Safe CLI commands for initialization, remembering, searching, Inbox review, checkpoints, rebuilds, diagnostics, and serving.
 - Local loopback Hono API and React/Vite workbench.
-- Stdio MCP tools: context, search, recent memories, durable writes, resolve, checkpoint, and Inbox review.
+- Stdio MCP tools: context, search, recent memories, durable writes, resolve, checkpoint, explicit processing, and Inbox review.
 - Codex adapter for MCP registration, managed `AGENTS.md`, and `SessionStart`, `PostCompact`, and `SessionEnd` hooks.
 - Optional processors (`agent-native`, Ollama, OpenRouter, and OpenAI-compatible HTTP providers) with conservative mode as the default.
 - Secret scanning and redaction before content becomes durable.
@@ -98,6 +98,7 @@ reporecall brain init           initialize a custom global brain
 reporecall status               validate files and report index health
 reporecall doctor               check runtime and storage health
 reporecall remember <text>      create an explicit durable memory
+reporecall process --content    process an explicit redacted capture
 reporecall search <query>       search the local SQLite index
 reporecall inbox                list pending processor suggestions
 reporecall rebuild              rebuild SQLite from canonical Markdown
@@ -125,6 +126,13 @@ write a durable record explicitly with `memory_remember` or `reporecall
 remember`; a durable session summary requires an explicit checkpoint. The
 default processor is disabled for privacy. Enable a processor deliberately if
 you want suggestions in Inbox.
+
+To process a capture explicitly, use `reporecall process --content "..."` or
+pipe a JSON capture to `reporecall process --json`. The command sends only
+redacted content to the configured provider; conservative mode routes provider
+suggestions to Inbox. `--allow-automatic` is required for an automatic-mode
+invocation. The capture itself is temporary and is never written as a session
+transcript.
 
 ## Privacy and processors
 

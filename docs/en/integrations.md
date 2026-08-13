@@ -8,9 +8,14 @@ Run the local stdio server:
 reporecall mcp
 ```
 
-The server exposes `memory_get_context`, `memory_search`, `memory_get_recent`, `memory_remember`, `memory_update`, `memory_resolve`, `memory_checkpoint`, and `memory_review_inbox`. Every response contains structured content and a concise summary.
+The server exposes `memory_get_context`, `memory_search`, `memory_get_recent`, `memory_remember`, `memory_update`, `memory_resolve`, `memory_checkpoint`, `memory_process`, and `memory_review_inbox`. Every response contains structured content and a concise summary.
 
 MCP writes use the same canonical stores and secret redaction as the CLI. Agents can add AI tags, but user-owned tags are preserved. A durable session event requires the explicit `memory_checkpoint` tool.
+
+`memory_process` accepts an explicitly supplied redacted capture and returns
+durable records, Inbox suggestions, duplicates, warnings, provider, and mode.
+It does not read transcript files. `allowAutomatic` defaults to `false`; use it
+only when automatic persistence is deliberately approved for that call.
 
 ## Codex
 
@@ -39,6 +44,10 @@ Processor kinds are `disabled`, `agent-native`, `ollama`, `openrouter`, and `ope
 - `conservative`: explicit records durable; provider suggestions go to Inbox;
 - `balanced`: high-confidence suggestions may become durable;
 - `automatic`: opt-in persistence, never the default.
+
+The CLI equivalent is `reporecall process --content "..."` or
+`reporecall process --json < capture.json`. Both entry points use the same
+redaction, duplicate, and Inbox rules.
 
 Duplicate detection uses normalized content, type, and project identity before processor-assisted relation work is considered.
 

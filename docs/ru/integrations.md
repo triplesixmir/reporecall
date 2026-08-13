@@ -8,9 +8,14 @@
 reporecall mcp
 ```
 
-Доступны `memory_get_context`, `memory_search`, `memory_get_recent`, `memory_remember`, `memory_update`, `memory_resolve`, `memory_checkpoint` и `memory_review_inbox`. Каждый ответ содержит structured content и короткое summary.
+Доступны `memory_get_context`, `memory_search`, `memory_get_recent`, `memory_remember`, `memory_update`, `memory_resolve`, `memory_checkpoint`, `memory_process` и `memory_review_inbox`. Каждый ответ содержит structured content и короткое summary.
 
 MCP writes используют те же canonical stores и secret redaction, что CLI. Agent может добавить AI tags, но user-owned tags сохраняются. Durable session event требует явного `memory_checkpoint`.
+
+`memory_process` принимает только явно переданную redacted capture и возвращает
+durable records, Inbox suggestions, duplicates, warnings, provider и mode. Он не
+читает transcript files. `allowAutomatic` по умолчанию `false`; включайте его
+только для конкретного осознанно разрешённого вызова.
 
 ## Codex
 
@@ -39,6 +44,10 @@ Processor kinds: `disabled`, `agent-native`, `ollama`, `openrouter`, `openai-com
 - `conservative`: explicit records durable, provider suggestions в Inbox;
 - `balanced`: high-confidence suggestions могут стать durable;
 - `automatic`: opt-in persistence, никогда не default.
+
+CLI-эквивалент — `reporecall process --content "..."` или
+`reporecall process --json < capture.json`. Оба entry point используют одинаковые
+redaction, duplicate и Inbox rules.
 
 Duplicate detection использует normalized content, type и project identity до processor-assisted relations.
 
