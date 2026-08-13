@@ -23,6 +23,7 @@ import {
   type RepoRecallConfig,
 } from './config.js';
 import { redactSecrets } from './privacy.js';
+import { startServe } from './server.js';
 
 export type CliIO = {
   cwd?: string;
@@ -365,6 +366,35 @@ async function mcpCommand(context: CommandContext, flags: ParsedArgs['flags']): 
   }
 }
 
+async function serveCommand(context: CommandContext, flags: ParsedArgs['flags']): Promise<number> {
+  const config = await getConfig(context, flags);
+  const assetsRoot = stringFlag(flags, 'assets');
+  const handle = await startServe(config, {
+    ...(assetsRoot === undefined ? {} : { assetsRoot }),
+    watch: !booleanFlag(flags, 'no-watch'),
+  });
+  context.stdout(`RepoRecall listening on http://127.0.0.1:${handle.port}\n`);
+
+  return new Promise<number>((resolvePromise) => {
+    let stopped = false;
+    const stop = () => {
+      if (stopped) return;
+      stopped = true;
+      process.removeListener('SIGINT', stop);
+      process.removeListener('SIGTERM', stop);
+      void handle
+        .close()
+        .then(() => resolvePromise(0))
+        .catch((error: unknown) => {
+          context.stderr(`${error instanceof Error ? error.message : String(error)}\n`);
+          resolvePromise(1);
+        });
+    };
+    process.once('SIGINT', stop);
+    process.once('SIGTERM', stop);
+  });
+}
+
 async function codexHookCommand(
   context: CommandContext,
   flags: ParsedArgs['flags'],
@@ -438,7 +468,7 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
   try {
     if (command === undefined || command === 'help' || booleanFlag(flags, 'help')) {
       context.stdout(
-        'RepoRecall commands: init, brain init, status, doctor, remember, search, inbox, rebuild, config, checkpoint, mcp, codex-hook\n',
+        'RepoRecall commands: init, brain init, status, doctor, remember, search, inbox, rebuild, config, checkpoint, serve, mcp, codex-hook\n',
       );
       return 0;
     }
@@ -470,6 +500,7 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
     if (command === 'status') return statusCommand(context, flags);
     if (command === 'doctor') return doctorCommand(context, flags);
     if (command === 'inbox') return inboxCommand(context, flags);
+    if (command === 'serve') return serveCommand(context, flags);
     if (command === 'mcp') return mcpCommand(context, flags);
     if (command === 'codex-hook') return codexHookCommand(context, flags, positionals[1]);
     if (command === 'config') printJson(context, await getConfig(context, flags));
@@ -484,3 +515,4 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
 export * from './config.js';
 export * from './init.js';
 export * from './privacy.js';
+export * from './server.js';

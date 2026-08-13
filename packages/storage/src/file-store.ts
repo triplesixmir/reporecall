@@ -38,11 +38,13 @@ function isMemoryId(id: string): boolean {
 function matchesFilters(record: MemoryRecord, filters: MemoryFilters = {}): boolean {
   if (filters.scope !== undefined && record.scope !== filters.scope) return false;
   if (filters.projectId !== undefined && record.project?.id !== filters.projectId) return false;
-  if (filters.workspaceId !== undefined && record.workspace?.id !== filters.workspaceId) return false;
+  if (filters.workspaceId !== undefined && record.workspace?.id !== filters.workspaceId)
+    return false;
   if (filters.type !== undefined && record.type !== filters.type) return false;
   if (filters.priority !== undefined && record.priority !== filters.priority) return false;
   if (filters.status !== undefined && record.status !== filters.status) return false;
-  if (filters.tag !== undefined && !record.tags.some((tag) => tag.name === filters.tag)) return false;
+  if (filters.tag !== undefined && !record.tags.some((tag) => tag.name === filters.tag))
+    return false;
   if (
     filters.query !== undefined &&
     !`${record.content}\n${record.tags.map((tag) => tag.name).join(' ')}`
@@ -62,16 +64,20 @@ export class FileMemoryStore implements MemoryStore {
   constructor(options: FileMemoryStoreOptions) {
     this.root = options.root;
     this.scope = options.scope ?? 'project';
-    this.recordsDir = join(this.root, this.scope === 'session' ? 'sessions' : 'memories');
+    this.recordsDir = this.directoryFor(this.scope);
   }
 
-  private pathFor(id: string): string {
+  private directoryFor(scope: MemoryScope): string {
+    return join(this.root, scope === 'session' ? 'sessions' : 'memories');
+  }
+
+  private pathFor(id: string, scope: MemoryScope = this.scope): string {
     if (!isMemoryId(id)) throw new Error(`Invalid memory id: ${id}`);
-    return join(this.recordsDir, `${id}.md`);
+    return join(this.directoryFor(scope), `${id}.md`);
   }
 
-  private async ensureDirectories(): Promise<void> {
-    await mkdir(this.recordsDir, { recursive: true });
+  private async ensureDirectories(scope: MemoryScope = this.scope): Promise<void> {
+    await mkdir(this.directoryFor(scope), { recursive: true });
   }
 
   private async atomicWrite(path: string, content: string): Promise<void> {
@@ -122,11 +128,26 @@ export class FileMemoryStore implements MemoryStore {
     return record;
   }
 
-  async update(id: string, patch: UpdateMemoryInput, options: UpdateMemoryOptions = {}): Promise<MemoryRecord> {
+  /** Write an already-created record into this store's canonical root. */
+  async writeRecord(record: MemoryRecord): Promise<MemoryRecord> {
+    await this.ensureDirectories(record.scope);
+    await this.atomicWrite(this.pathFor(record.id, record.scope), serializeMemory(record));
+    return record;
+  }
+
+  async update(
+    id: string,
+    patch: UpdateMemoryInput,
+    options: UpdateMemoryOptions = {},
+  ): Promise<MemoryRecord> {
     const current = await this.get(id);
     if (current === null) throw new Error(`Memory not found: ${id}`);
     const updated = updateMemoryRecord(current, patch, options);
-    await this.atomicWrite(this.pathFor(id), serializeMemory(updated));
+    const currentPath = this.pathFor(id, current.scope);
+    const updatedPath = this.pathFor(id, updated.scope);
+    await this.ensureDirectories(updated.scope);
+    await this.atomicWrite(updatedPath, serializeMemory(updated));
+    if (currentPath !== updatedPath) await unlink(currentPath);
     return updated;
   }
 
@@ -153,7 +174,9 @@ export class FileMemoryStore implements MemoryStore {
       } catch (error) {
         report.invalid.push({
           path,
-          issues: [{ path: 'file', message: error instanceof Error ? error.message : String(error) }],
+          issues: [
+            { path: 'file', message: error instanceof Error ? error.message : String(error) },
+          ],
         });
       }
     }
@@ -184,7 +207,9 @@ export class FileMemoryStore implements MemoryStore {
       } catch (error) {
         report.invalid.push({
           path,
-          issues: [{ path: 'file', message: error instanceof Error ? error.message : String(error) }],
+          issues: [
+            { path: 'file', message: error instanceof Error ? error.message : String(error) },
+          ],
         });
       }
     }

@@ -21,7 +21,9 @@ describe('FileMemoryStore', () => {
       source: { kind: 'user', method: 'checkpoint' },
     });
 
-    await expect(readFile(join(root, 'sessions', `${record.id}.md`), 'utf8')).resolves.toContain('Explicit checkpoint only.');
+    await expect(readFile(join(root, 'sessions', `${record.id}.md`), 'utf8')).resolves.toContain(
+      'Explicit checkpoint only.',
+    );
     await expect(readdir(join(root, 'memories'))).rejects.toThrow();
   });
 
@@ -52,12 +54,16 @@ describe('FileMemoryStore', () => {
       tags: [{ name: 'security', origin: 'user' }],
     });
 
-    const updated = await store.update(record.id, {
-      tags: [
-        { name: 'security', origin: 'ai', confidence: 0.5 },
-        { name: 'privacy', origin: 'ai', confidence: 0.8 },
-      ],
-    }, { actor: 'processor' });
+    const updated = await store.update(
+      record.id,
+      {
+        tags: [
+          { name: 'security', origin: 'ai', confidence: 0.5 },
+          { name: 'privacy', origin: 'ai', confidence: 0.8 },
+        ],
+      },
+      { actor: 'processor' },
+    );
 
     expect(updated.tags).toEqual([
       { name: 'security', origin: 'user' },
@@ -65,17 +71,40 @@ describe('FileMemoryStore', () => {
     ]);
   });
 
+  test('relocates a record when its scope changes within one root', async () => {
+    const { root, store } = await createStore();
+    const record = await store.create({
+      content: 'Move this record to the session scope.',
+      scope: 'project',
+      type: 'event',
+    });
+
+    const updated = await store.update(record.id, { scope: 'session' });
+
+    expect(updated.scope).toBe('session');
+    await expect(readFile(join(root, 'sessions', `${record.id}.md`), 'utf8')).resolves.toContain(
+      'Move this record to the session scope.',
+    );
+    await expect(readFile(join(root, 'memories', `${record.id}.md`), 'utf8')).rejects.toThrow();
+  });
+
   test('reports malformed files and leaves them untouched', async () => {
     const { root, store } = await createStore();
     await writeFile(join(root, 'broken.md'), '---\nid: broken\n---\nnot a memory', 'utf8');
-    await writeFile(join(root, 'memories', 'broken.md'), '---\nid: broken\n---\nnot a memory', 'utf8');
+    await writeFile(
+      join(root, 'memories', 'broken.md'),
+      '---\nid: broken\n---\nnot a memory',
+      'utf8',
+    );
 
     const report = await store.validateAll();
 
     expect(report.valid).toBe(0);
     expect(report.invalid).toHaveLength(1);
     expect(report.invalid[0]?.path).toContain('broken.md');
-    await expect(readFile(join(root, 'memories', 'broken.md'), 'utf8')).resolves.toContain('not a memory');
+    await expect(readFile(join(root, 'memories', 'broken.md'), 'utf8')).resolves.toContain(
+      'not a memory',
+    );
   });
 
   test('removes a memory from the canonical directory', async () => {
@@ -113,6 +142,8 @@ describe('FileMemoryStore', () => {
       content: 'Legacy memory.',
       createdAt: '2026-08-13T12:00:00.000Z',
     });
-    await expect(readdir(join(root, 'memories'))).resolves.toContainEqual(expect.stringMatching(/\.bak\./));
+    await expect(readdir(join(root, 'memories'))).resolves.toContainEqual(
+      expect.stringMatching(/\.bak\./),
+    );
   });
 });
