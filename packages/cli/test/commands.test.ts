@@ -1,0 +1,60 @@
+import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, describe, expect, test } from 'vitest';
+import { runCli, type CliIO } from '../src/index.js';
+
+const roots: string[] = [];
+
+async function fixture() {
+  const root = await mkdtemp(join(tmpdir(), 'reporecall-cli-'));
+  roots.push(root);
+  return root;
+}
+
+function io(cwd: string, output: string[], errors: string[]): CliIO {
+  return {
+    cwd,
+    homeDir: join(cwd, 'home'),
+    stdout: (value) => output.push(value),
+    stderr: (value) => errors.push(value),
+  };
+}
+
+afterEach(async () => {
+  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+});
+
+describe('RepoRecall CLI', () => {
+  test('initializes, remembers, rebuilds, and searches a custom local brain', async () => {
+    const root = await fixture();
+    const project = join(root, 'project');
+    const brain = join(root, 'brain');
+    const output: string[] = [];
+    const errors: string[] = [];
+    const context = io(project, output, errors);
+
+    await expect(runCli(['init', '--brain', brain], context)).resolves.toBe(0);
+    await expect(runCli(['remember', 'Keep this local project decision.', '--brain', brain], context)).resolves.toBe(0);
+    await expect(runCli(['rebuild', '--brain', brain], context)).resolves.toBe(0);
+    await expect(runCli(['search', 'local project decision', '--brain', brain], context)).resolves.toBe(0);
+
+    expect(output.join('\n')).toContain('Keep this local project decision.');
+    await expect(readdir(join(project, '.reporecall', 'memories'))).resolves.toHaveLength(1);
+    expect(errors).toEqual([]);
+  });
+
+  test('refuses to persist a secret-only memory', async () => {
+    const root = await fixture();
+    const project = join(root, 'project');
+    const brain = join(root, 'brain');
+    const output: string[] = [];
+    const errors: string[] = [];
+    const context = io(project, output, errors);
+
+    await runCli(['init', '--brain', brain], context);
+    await expect(runCli(['remember', 'sk-proj-1234567890abcdef', '--brain', brain], context)).resolves.toBe(2);
+    await expect(readdir(join(project, '.reporecall', 'memories'))).resolves.toEqual([]);
+    expect(errors.join('\n')).toMatch(/secret|credential/i);
+  });
+});
