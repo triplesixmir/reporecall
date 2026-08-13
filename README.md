@@ -2,14 +2,155 @@
 
 > Persistent memory for AI agents, stored where you control it.
 
-RepoRecall is a local-first, model-agnostic memory layer for coding agents. Durable memories are readable Markdown files that travel with your project through Git. SQLite is only a disposable local search index.
+RepoRecall is a local-first, model-agnostic memory layer for coding agents. It keeps durable memories as readable Markdown files with YAML frontmatter, stores the fast search index in disposable SQLite, and exposes the same contract through a CLI, local API, MCP, and Codex hooks.
 
-This repository is being built in vertical slices. The public implementation status is tracked in [CHANGELOG.md](CHANGELOG.md) and the architecture decisions live in [docs/en/architecture.md](docs/en/architecture.md).
+The important boundary is simple: Markdown is the source of truth. SQLite can be deleted and rebuilt at any time.
 
-## Status
+## What v0.1 includes
 
-Early v0.1 development. APIs may change until the first stable release.
+- Global brain plus project, workspace, and explicit session scopes.
+- Versioned schema validation and atomic Markdown writes.
+- SQLite FTS5 search with metadata filters, tags, relations, and index diagnostics.
+- Deterministic context selection with pinned/project-current boosts and token budgets.
+- Safe CLI commands for initialization, remembering, searching, Inbox review, checkpoints, rebuilds, diagnostics, and serving.
+- Local loopback Hono API and React/Vite workbench.
+- Stdio MCP tools: context, search, recent memories, durable writes, resolve, checkpoint, and Inbox review.
+- Codex adapter for MCP registration, managed `AGENTS.md`, and `SessionStart`, `PostCompact`, and `SessionEnd` hooks.
+- Optional processors (`agent-native`, Ollama, OpenRouter, and OpenAI-compatible HTTP providers) with conservative mode as the default.
+- Secret scanning and redaction before content becomes durable.
 
-## License
+## Quick start
 
-MIT. See [LICENSE](LICENSE).
+Requirements: Node.js `>=22.12.0` and pnpm 11.
+
+```bash
+git clone <your-repo-url> reporecall
+cd reporecall
+pnpm install --frozen-lockfile
+pnpm check
+pnpm exec tsx packages/cli/src/bin.ts init --yes
+pnpm exec tsx packages/cli/src/bin.ts remember --type decision --content "Canonical Markdown is the source of truth."
+pnpm exec tsx packages/cli/src/bin.ts serve
+```
+
+Open `http://127.0.0.1:4317`. `serve` binds to loopback by default and serves the compiled workbench when `apps/web/dist` exists. Use `pnpm build` first for a production asset bundle.
+
+For an installed CLI after building:
+
+```bash
+pnpm build
+node packages/cli/dist/bin.js doctor
+node packages/cli/dist/bin.js status
+```
+
+## File-first storage
+
+The canonical layout is intentionally inspectable:
+
+```text
+~/.reporecall/brain/
+  memories/mem_<uuid>.md
+  inbox/inbox_<uuid>.md
+  sessions/<id>.md
+  .reporecall/config.toml
+
+your-project/
+  .reporecall/
+    memories/mem_<uuid>.md
+    inbox/inbox_<uuid>.md
+    sessions/<id>.md
+    config.toml
+```
+
+Project memory belongs in the project checkout and can be committed. The global brain is user-level and should normally remain on a private filesystem or private remote. Session captures are redacted and temporary; no raw transcript is saved, and a durable session summary is created only by an explicit checkpoint.
+
+## Scopes and context
+
+| Scope       | Durable location                 | Typical use                                        |
+| ----------- | -------------------------------- | -------------------------------------------------- |
+| `global`    | global brain                     | personal conventions and cross-project preferences |
+| `workspace` | configured project memory root   | shared local workspace context                     |
+| `project`   | `<project>/.reporecall/memories` | repository decisions and constraints               |
+| `session`   | `<project>/.reporecall/sessions` | explicit checkpoints and lifecycle events          |
+
+Context building is deterministic. Archived, dismissed, and superseded records are excluded by default. Pinned and project-current records are considered first; remaining records are ranked by scope, status, priority, relevance, recency, confidence, and stable tie-breakers until the token budget is full.
+
+## CLI
+
+```text
+reporecall init                 initialize project memory and managed guidance
+reporecall brain init           initialize a custom global brain
+reporecall status               validate files and report index health
+reporecall doctor               check runtime and storage health
+reporecall remember <text>      create an explicit durable memory
+reporecall search <query>       search the local SQLite index
+reporecall inbox                list pending processor suggestions
+reporecall rebuild              rebuild SQLite from canonical Markdown
+reporecall config               print resolved configuration
+reporecall checkpoint <summary> persist an explicit session checkpoint
+reporecall serve                run the loopback API, UI, and watcher
+reporecall mcp                  run the stdio MCP server
+reporecall codex-hook <event>   handle a Codex lifecycle hook
+```
+
+Paths and behavior can be changed with CLI flags or TOML configuration. Precedence is CLI, project, brain, user, then platform defaults. The default brain is `~/.reporecall/brain` and the default API port is `4317`.
+
+## API, MCP, and Codex
+
+`reporecall serve` provides a local API for the workbench: memory CRUD, recent records, projects, tags, Inbox actions, relation graph, overview, and health. The API is intentionally loopback-only unless a caller explicitly supplies another hostname through the server API.
+
+The MCP server is model-agnostic and returns both structured data and a short human-readable summary. MCP writes preserve user-owned tags and run the same redaction rules as the CLI.
+
+The Codex adapter installs the MCP command and managed blocks without overwriting user text or unrelated hooks. `SessionStart` and `PostCompact` inject deterministic context. `SessionEnd` writes only a lifecycle marker. Hook failures are fail-open, and no unstable transcript format is required.
+
+## Privacy and processors
+
+RepoRecall scans for private keys, credential paths, API-key prefixes, bearer tokens, and common token assignments. Detected secrets are replaced with a visible redaction marker and a warning. A write made only of secret material is rejected. Detection is a safety layer, not a guarantee: review memories before committing them.
+
+Processors are optional. `conservative` mode is the default: explicit durable records are written, while processor suggestions go to Inbox. `balanced` and `automatic` require deliberate configuration; automatic persistence is opt-in. Provider credentials are read from environment variables and never stored in memory files.
+
+## Web workbench
+
+The local React workbench includes:
+
+- Overview with memory, project, active-context, and Inbox metrics.
+- Memories with URL-synchronized search and filters, CRUD editor, tags, status, priority, scope, pinning, and secret warnings.
+- Projects, Recent, Inbox review, relation Graph, and Settings screens.
+- Semantic controls, visible loading/empty/error states, keyboard-accessible editor focus, and responsive layouts for 320, 768, 1024, and 1440px.
+
+The graph is a projection of indexed relations. It is not another storage system.
+
+## Git and cross-device workflow
+
+1. Machine A runs `remember` or saves a memory in the workbench.
+2. Commit the relevant project `.reporecall/memories/*.md` files.
+3. Machine B pulls or clones the repository.
+4. Machine B runs `reporecall rebuild` to create a local SQLite index.
+5. The same context builder retrieves the shared Markdown memory without copying SQLite or machine-specific paths.
+
+Keep private global memories out of public repositories. Use private remotes when project memory contains sensitive context.
+
+## Limitations and roadmap
+
+v0.1 intentionally has no cloud backend, accounts, billing, telemetry, embeddings, vector database, mobile app, or team collaboration. Claude Code and other harnesses can use the generic MCP contract, but Codex is the first adapter with automated lifecycle installation.
+
+Next areas are stronger import/export tooling, richer relation editing, broader adapter coverage, and additional accessibility and cross-platform verification.
+
+## Documentation
+
+- [Architecture (EN)](docs/en/architecture.md) · [Архитектура (RU)](docs/ru/architecture.md)
+- [Getting started](docs/en/getting-started.md) · [Быстрый старт](docs/ru/getting-started.md)
+- [CLI and configuration](docs/en/cli.md) · [CLI и конфигурация](docs/ru/cli.md)
+- [Privacy](docs/en/privacy.md) · [Приватность](docs/ru/privacy.md)
+- [Integrations](docs/en/integrations.md) · [Интеграции](docs/ru/integrations.md)
+- [Release verification](docs/en/release.md) · [Проверка релиза](docs/ru/release.md)
+
+## Development
+
+```bash
+pnpm install --frozen-lockfile
+pnpm check
+pnpm test:e2e
+```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a change. RepoRecall is released under the [MIT License](LICENSE).

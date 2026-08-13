@@ -4,32 +4,35 @@
   "description": "Persistent, local-first memory for AI agents.",
   "type": "module",
   "bin": {
-    "reporecall": "dist/bin.js"
+    "reporecall": "./dist/bin.js"
   },
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "main": "./dist/index.js",
   "exports": {
-    ".": "./dist/index.js"
+    ".": {
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
   },
   "files": [
-    "dist"
+    "dist/bin.js",
+    "dist/index.js"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "node scripts/bundle.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@hono/node-server": "^2.0.12",
     "@iarna/toml": "^2.2.5",
     "@inquirer/prompts": "^7.8.0",
-    "@reporecall/context": "workspace:*",
-    "@reporecall/core": "workspace:*",
-    "@reporecall/index": "workspace:*",
-    "@reporecall/integrations": "workspace:*",
-    "@reporecall/mcp": "workspace:*",
-    "@reporecall/processors": "workspace:*",
-    "@reporecall/storage": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "better-sqlite3": "^13.0.3",
     "cac": "^6.7.14",
-    "hono": "^4.12.32"
+    "hono": "^4.12.32",
+    "yaml": "^2.8.1",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2"
   }
 }

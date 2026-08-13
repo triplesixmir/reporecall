@@ -18,9 +18,6 @@ test-results/
 *.sqlite
 *.sqlite-*
 
-# Local development memory must never enter the public repository.
+# A global brain or an intentionally local brain directory must never enter the repository.
 brain/
-.reporecall/memories/
-.reporecall/inbox/
-.reporecall/sessions/
 .pnpm-store/

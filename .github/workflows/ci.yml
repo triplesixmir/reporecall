@@ -23,3 +23,10 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
+      - name: Install Chromium on Linux
+        if: runner.os == 'Linux'
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Install Chromium on macOS and Windows
+        if: runner.os != 'Linux'
+        run: pnpm exec playwright install chromium
+      - run: pnpm test:e2e

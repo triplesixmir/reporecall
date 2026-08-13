@@ -1,0 +1,38 @@
+# Интеграции
+
+## MCP
+
+Запуск локального stdio server:
+
+```bash
+reporecall mcp
+```
+
+Доступны `memory_get_context`, `memory_search`, `memory_get_recent`, `memory_remember`, `memory_update`, `memory_resolve`, `memory_checkpoint` и `memory_review_inbox`. Каждый ответ содержит structured content и короткое summary.
+
+MCP writes используют те же canonical stores и secret redaction, что CLI. Agent может добавить AI tags, но user-owned tags сохраняются. Durable session event требует явного `memory_checkpoint`.
+
+## Codex
+
+Adapter поддерживает user-level и project-level installation через официальный Codex MCP command и managed config files. Installation idempotent:
+
+- `codex mcp add` регистрирует local stdio server;
+- managed `AGENTS.md` block объясняет source-of-truth и privacy semantics;
+- managed `hooks.json` inject-ит context на `SessionStart` и `PostCompact`, lifecycle marker — на `SessionEnd`;
+- unrelated user text и hook handlers сохраняются.
+
+Hook fail-open. Если index или context builder недоступен, session продолжается, а hook пишет diagnostic, не блокируя agent.
+
+## Processors
+
+Processor kinds: `disabled`, `agent-native`, `ollama`, `openrouter`, `openai-compatible`. HTTP providers используют единый typed contract и environment credentials. Modes:
+
+- `conservative`: explicit records durable, provider suggestions в Inbox;
+- `balanced`: high-confidence suggestions могут стать durable;
+- `automatic`: opt-in persistence, никогда не default.
+
+Duplicate detection использует normalized content, type и project identity до processor-assisted relations.
+
+## Generic adapters
+
+Другие harnesses могут использовать MCP contract или реализовать `AgentAdapter` и `ContextBuilder`. В v0.1 нет заявления об automatic transcript capture для non-Codex harnesses.

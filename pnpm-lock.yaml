@@ -72,33 +72,28 @@ importers:
       '@inquirer/prompts':
         specifier: ^7.8.0
         version: 7.10.1(@types/node@24.13.3)
-      '@reporecall/context':
-        specifier: workspace:*
-        version: link:../context
-      '@reporecall/core':
-        specifier: workspace:*
-        version: link:../core
-      '@reporecall/index':
-        specifier: workspace:*
-        version: link:../index
-      '@reporecall/integrations':
-        specifier: workspace:*
-        version: link:../integrations
-      '@reporecall/mcp':
-        specifier: workspace:*
-        version: link:../mcp
-      '@reporecall/processors':
-        specifier: workspace:*
-        version: link:../processors
-      '@reporecall/storage':
-        specifier: workspace:*
-        version: link:../storage
+      '@modelcontextprotocol/sdk':
+        specifier: ^1.30.0
+        version: 1.30.0(supports-color@7.2.0)(zod@4.4.3)
+      better-sqlite3:
+        specifier: ^13.0.3
+        version: 13.0.3
       cac:
         specifier: ^6.7.14
         version: 6.7.14
       hono:
         specifier: ^4.12.32
         version: 4.13.1
+      yaml:
+        specifier: ^2.8.1
+        version: 2.9.0
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
+    devDependencies:
+      esbuild:
+        specifier: ^0.28.2
+        version: 0.28.2
 
   packages/context:
     dependencies:

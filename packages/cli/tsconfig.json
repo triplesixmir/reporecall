@@ -1,14 +1,17 @@
 {
   "extends": "../../tsconfig.base.json",
-  "compilerOptions": { "rootDir": "src", "outDir": "dist", "composite": true },
-  "references": [
-    { "path": "../core" },
-    { "path": "../storage" },
-    { "path": "../index" },
-    { "path": "../context" },
-    { "path": "../integrations" },
-    { "path": "../processors" },
-    { "path": "../mcp" }
-  ],
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@reporecall/core": ["../core/src/index.ts"],
+      "@reporecall/storage": ["../storage/src/index.ts"],
+      "@reporecall/index": ["../index/src/index.ts"],
+      "@reporecall/context": ["../context/src/index.ts"],
+      "@reporecall/integrations": ["../integrations/src/index.ts"],
+      "@reporecall/processors": ["../processors/src/index.ts"],
+      "@reporecall/mcp": ["../mcp/src/index.ts"]
+    },
+    "noEmit": true
+  },
   "include": ["src/**/*.ts"]
 }
