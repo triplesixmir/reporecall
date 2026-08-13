@@ -5,8 +5,11 @@ import {
   MEMORY_SCOPES,
   MEMORY_STATUSES,
   MEMORY_TYPES,
+  redactedSessionCaptureSchema,
   type MemoryScope,
   type MemoryType,
+  type ProjectRef,
+  type RedactedSessionCapture,
 } from '@reporecall/core';
 import { DeterministicContextBuilder } from '@reporecall/context';
 import { SqliteMemoryIndex } from '@reporecall/index';
@@ -15,6 +18,7 @@ import { runMcpStdio, type InboxItem, type MemoryMcpRuntime } from '@reporecall/
 import { FileInboxStore } from '@reporecall/processors';
 import { FileMemoryStore } from '@reporecall/storage';
 import { initializeBrain, initializeProject } from './init.js';
+import { createProcessingRuntime } from './processing.js';
 import {
   PROCESSOR_MODES,
   PROCESSORS,
@@ -28,6 +32,7 @@ import { startServe } from './server.js';
 export type CliIO = {
   cwd?: string;
   homeDir?: string;
+  stdin?: AsyncIterable<string | Uint8Array>;
   stdout?: (message: string) => void;
   stderr?: (message: string) => void;
 };
@@ -37,7 +42,9 @@ type ParsedArgs = {
   flags: Record<string, string | boolean>;
 };
 
-type CommandContext = Required<Pick<CliIO, 'cwd' | 'homeDir' | 'stdout' | 'stderr'>>;
+type CommandContext = Required<Pick<CliIO, 'cwd' | 'homeDir' | 'stdout' | 'stderr'>> & {
+  stdin: AsyncIterable<string | Uint8Array>;
+};
 
 function parseArgs(args: string[]): ParsedArgs {
   const positionals: string[] = [];
@@ -201,13 +208,116 @@ function printJson(context: CommandContext, value: unknown): void {
   context.stdout(`${JSON.stringify(value, null, 2)}\n`);
 }
 
-async function readStdin(): Promise<string> {
+async function readStdin(stream: AsyncIterable<string | Uint8Array>): Promise<string> {
   const chunks: string[] = [];
-  const stream = process.stdin as AsyncIterable<string | Uint8Array>;
   for await (const chunk of stream) {
     chunks.push(typeof chunk === 'string' ? chunk : new TextDecoder().decode(chunk));
   }
   return chunks.join('');
+}
+
+function projectFromFlags(cwd: string, flags: ParsedArgs['flags']): ProjectRef {
+  const defaultProject = projectRef(cwd);
+  const root = stringFlag(flags, 'project-root') ?? defaultProject.root;
+  const resolvedRoot = resolve(root);
+  return {
+    id: stringFlag(flags, 'project-id') ?? projectRef(resolvedRoot).id,
+    root: resolvedRoot,
+    name: stringFlag(flags, 'project-name') ?? basename(resolvedRoot),
+  };
+}
+
+function workspaceFromFlags(flags: ParsedArgs['flags']): RedactedSessionCapture['workspace'] {
+  const id = stringFlag(flags, 'workspace-id');
+  const name = stringFlag(flags, 'workspace-name');
+  if (id === undefined && name === undefined) return undefined;
+  return { id: id ?? name ?? 'workspace', ...(name === undefined ? {} : { name }) };
+}
+
+function captureWithFlags(
+  context: CommandContext,
+  flags: ParsedArgs['flags'],
+  capture: RedactedSessionCapture,
+): RedactedSessionCapture {
+  const hasProjectOverride = ['project-id', 'project-root', 'project-name'].some(
+    (name) => stringFlag(flags, name) !== undefined,
+  );
+  const project = hasProjectOverride
+    ? projectFromFlags(context.cwd, flags)
+    : (capture.project ?? projectFromFlags(context.cwd, flags));
+  const workspace = workspaceFromFlags(flags) ?? capture.workspace;
+  const sessionId = stringFlag(flags, 'session-id') ?? capture.sessionId;
+  const capturedAt = stringFlag(flags, 'captured-at') ?? capture.capturedAt;
+  return {
+    ...capture,
+    project,
+    ...(workspace === undefined ? {} : { workspace }),
+    ...(sessionId === undefined ? {} : { sessionId }),
+    ...(capturedAt === undefined ? {} : { capturedAt }),
+  };
+}
+
+async function processCaptureInput(
+  context: CommandContext,
+  flags: ParsedArgs['flags'],
+): Promise<RedactedSessionCapture> {
+  const content = stringFlag(flags, 'content');
+  if (content !== undefined) {
+    return redactedSessionCaptureSchema.parse(
+      captureWithFlags(context, flags, { content }),
+    ) as RedactedSessionCapture;
+  }
+
+  const source = await readStdin(context.stdin);
+  if (source.trim() === '') throw new Error('process requires --content or JSON on stdin');
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(source) as unknown;
+  } catch {
+    throw new Error('process stdin must contain a valid JSON object');
+  }
+  const capture = redactedSessionCaptureSchema.parse(parsed) as RedactedSessionCapture;
+  return redactedSessionCaptureSchema.parse(
+    captureWithFlags(context, flags, capture),
+  ) as RedactedSessionCapture;
+}
+
+async function processCommand(
+  context: CommandContext,
+  flags: ParsedArgs['flags'],
+): Promise<number> {
+  const config = await getConfig(context, flags);
+  const capture = await processCaptureInput(context, flags);
+  const scanned = redactSecrets(capture.content);
+  if (scanned.blocked || scanned.redacted.trim() === '') {
+    context.stderr('Refusing to process a capture containing only a secret or credential.\n');
+    return 2;
+  }
+  const wasRedacted = scanned.redacted !== capture.content;
+  const safeCapture = wasRedacted ? { ...capture, content: scanned.redacted } : capture;
+  const runtime = createProcessingRuntime(config);
+  try {
+    const result = await runtime.processCapture(safeCapture, {
+      allowAutomatic: booleanFlag(flags, 'allow-automatic'),
+    });
+    const output = wasRedacted
+      ? {
+          ...result,
+          warnings: ['Capture secrets were redacted before processing.', ...result.warnings],
+        }
+      : result;
+    if (booleanFlag(flags, 'json')) {
+      printJson(context, output);
+    } else {
+      context.stdout(
+        `Processed with ${output.provider} (${output.mode}): ${output.durable.length} durable, ${output.inbox.length} Inbox, ${output.duplicates.length} duplicates.\n`,
+      );
+      for (const warning of output.warnings) context.stderr(`Warning: ${warning}\n`);
+    }
+    return 0;
+  } finally {
+    runtime.close();
+  }
 }
 
 async function rememberCommand(
@@ -423,7 +533,7 @@ async function codexHookCommand(
   event: string | undefined,
 ): Promise<number> {
   try {
-    const source = await readStdin();
+    const source = await readStdin(context.stdin);
     let hookInput: CodexHookInput = event === undefined ? {} : { hook_event_name: event };
     if (source.trim() !== '') {
       const parsed: unknown = JSON.parse(source);
@@ -482,6 +592,7 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
   const context: CommandContext = {
     cwd: resolve(io.cwd ?? process.cwd()),
     homeDir: resolve(io.homeDir ?? process.env.HOME ?? process.cwd()),
+    stdin: io.stdin ?? (process.stdin as AsyncIterable<string | Uint8Array>),
     stdout: io.stdout ?? ((message) => process.stdout.write(message)),
     stderr: io.stderr ?? ((message) => process.stderr.write(message)),
   };
@@ -490,7 +601,7 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
   try {
     if (command === undefined || command === 'help' || booleanFlag(flags, 'help')) {
       context.stdout(
-        'RepoRecall commands: init, brain init, status, doctor, remember, search, inbox, rebuild, config, checkpoint, serve, mcp, codex install, codex uninstall, codex-hook\n',
+        'RepoRecall commands: init, brain init, status, doctor, remember, process, search, inbox, rebuild, config, checkpoint, serve, mcp, codex install, codex uninstall, codex-hook\n',
       );
       return 0;
     }
@@ -513,6 +624,7 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
         type: 'event',
       });
     }
+    if (command === 'process') return await processCommand(context, flags);
     if (command === 'search') {
       const query = positionals.slice(1).join(' ');
       if (query.trim() === '') throw new Error('search requires a query');
