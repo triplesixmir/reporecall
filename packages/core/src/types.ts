@@ -45,6 +45,22 @@ export type RelationType = (typeof RELATION_TYPES)[number];
 export const SOURCE_KINDS = ['user', 'agent', 'processor', 'import'] as const;
 export type SourceKind = (typeof SOURCE_KINDS)[number];
 
+export const PROCESSOR_KINDS = [
+  'agent-native',
+  'ollama',
+  'openrouter',
+  'openai-compatible',
+  'disabled',
+] as const;
+export type ProcessorKind = (typeof PROCESSOR_KINDS)[number];
+
+export const PROCESSOR_MODES = ['conservative', 'balanced', 'automatic'] as const;
+export type ProcessorMode = (typeof PROCESSOR_MODES)[number];
+
+export const INBOX_SCHEMA_VERSION = 1 as const;
+export const INBOX_STATUSES = ['pending', 'accepted', 'dismissed'] as const;
+export type InboxStatus = (typeof INBOX_STATUSES)[number];
+
 export type MemoryTag = {
   name: string;
   origin: 'user' | 'ai';
@@ -234,10 +250,92 @@ export type MemoryStore = {
   list(filters?: MemoryFilters): Promise<MemoryRecord[]>;
   get(id: string): Promise<MemoryRecord | null>;
   create(input: CreateMemoryInput): Promise<MemoryRecord>;
-  update(id: string, patch: UpdateMemoryInput, options?: UpdateMemoryOptions): Promise<MemoryRecord>;
+  update(
+    id: string,
+    patch: UpdateMemoryInput,
+    options?: UpdateMemoryOptions,
+  ): Promise<MemoryRecord>;
   remove(id: string): Promise<void>;
   validateAll(): Promise<ValidationReport>;
 };
+
+export type ProcessorSuggestion = CreateMemoryInput & {
+  reason?: string;
+};
+
+export type RedactedSessionCapture = {
+  content: string;
+  capturedAt?: string;
+  sessionId?: string;
+  project?: ProjectRef;
+  workspace?: WorkspaceRef;
+  source?: MemorySource;
+  explicit?: CreateMemoryInput[];
+};
+
+export type ProcessorProviderResult = {
+  suggestions: ProcessorSuggestion[];
+  warnings: string[];
+};
+
+export interface ProcessorSuggestionProvider {
+  suggest(capture: RedactedSessionCapture): Promise<ProcessorProviderResult>;
+}
+
+export type InboxItem = {
+  schema: typeof INBOX_SCHEMA_VERSION;
+  id: string;
+  status: InboxStatus;
+  createdAt: string;
+  updatedAt: string;
+  suggested: ProcessorSuggestion;
+  source?: MemorySource;
+  reason?: string;
+  duplicateOf?: string;
+};
+
+export type CreateInboxItemInput = {
+  suggested: ProcessorSuggestion;
+  source?: MemorySource;
+  reason?: string;
+  duplicateOf?: string;
+  status?: InboxStatus;
+};
+
+export type UpdateInboxItemInput = Partial<
+  Pick<InboxItem, 'status' | 'suggested' | 'source' | 'reason' | 'duplicateOf'>
+>;
+
+export type InboxFilters = {
+  status?: InboxStatus;
+  projectId?: string;
+  limit?: number;
+};
+
+export type InboxStore = {
+  list(filters?: InboxFilters): Promise<InboxItem[]>;
+  get(id: string): Promise<InboxItem | null>;
+  create(input: CreateInboxItemInput): Promise<InboxItem>;
+  update(id: string, patch: UpdateInboxItemInput): Promise<InboxItem>;
+  remove(id: string): Promise<void>;
+  validateAll(): Promise<ValidationReport>;
+};
+
+export type DuplicateMatch = {
+  candidate: ProcessorSuggestion;
+  existing: MemoryRecord;
+};
+
+export type ProcessorResult = {
+  durable: MemoryRecord[];
+  inbox: InboxItem[];
+  duplicates: DuplicateMatch[];
+  warnings: string[];
+};
+
+export interface MemoryProcessor {
+  process(capture: RedactedSessionCapture): Promise<ProcessorResult>;
+}
 
 export type AdapterTarget = {
   scope: 'user' | 'project';

@@ -12,6 +12,7 @@ import {
   type ContextBuilder,
   type ContextRequest,
   type CreateMemoryInput,
+  type InboxItem as CoreInboxItem,
   type MemoryFilters,
   type MemoryIndex,
   type MemoryRecord,
@@ -27,14 +28,7 @@ export const REPORECALL_MCP_INSTRUCTIONS = [
   'Never write secrets, credentials, private keys, or raw transcripts. User-owned tags are preserved when an agent updates a memory.',
 ].join(' ');
 
-export type InboxItem = {
-  id: string;
-  content: string;
-  path?: string;
-  createdAt?: string;
-  scope?: MemoryScope;
-  project?: { id: string; root: string; name?: string };
-};
+export type InboxItem = CoreInboxItem;
 
 export type MemoryWriteOperation = 'create' | 'update' | 'resolve' | 'checkpoint';
 
@@ -183,7 +177,10 @@ async function findMemory(
   return null;
 }
 
-async function listAll(runtime: MemoryMcpRuntime, filters: MemoryFilters = {}): Promise<MemoryRecord[]> {
+async function listAll(
+  runtime: MemoryMcpRuntime,
+  filters: MemoryFilters = {},
+): Promise<MemoryRecord[]> {
   const records = (await Promise.all(stores(runtime).map((store) => store.list(filters)))).flat();
   const unique = new Map(records.map((record) => [record.id, record]));
   return [...unique.values()].sort((left, right) => {
@@ -244,7 +241,10 @@ export function createMemoryMcpServer(runtime: MemoryMcpRuntime): McpServer {
         ...(arguments_.tag === undefined ? {} : { tag: arguments_.tag }),
         limit: arguments_.limit,
       });
-      return success({ results, count: results.length }, `Found ${results.length} memor${results.length === 1 ? 'y' : 'ies'}.`);
+      return success(
+        { results, count: results.length },
+        `Found ${results.length} memor${results.length === 1 ? 'y' : 'ies'}.`,
+      );
     },
   );
 
@@ -266,11 +266,16 @@ export function createMemoryMcpServer(runtime: MemoryMcpRuntime): McpServer {
           : {
               workspace: {
                 id: arguments_.workspaceId,
-                ...(arguments_.workspaceName === undefined ? {} : { name: arguments_.workspaceName }),
+                ...(arguments_.workspaceName === undefined
+                  ? {}
+                  : { name: arguments_.workspaceName }),
               },
             }),
       });
-      return success({ bundle }, `Built context with ${bundle.items.length} memor${bundle.items.length === 1 ? 'y' : 'ies'}.`);
+      return success(
+        { bundle },
+        `Built context with ${bundle.items.length} memor${bundle.items.length === 1 ? 'y' : 'ies'}.`,
+      );
     },
   );
 
@@ -283,7 +288,10 @@ export function createMemoryMcpServer(runtime: MemoryMcpRuntime): McpServer {
     },
     async (arguments_) => {
       const records = (await listAll(runtime)).slice(0, arguments_.limit);
-      return success({ records, count: records.length }, `Returned ${records.length} recent memor${records.length === 1 ? 'y' : 'ies'}.`);
+      return success(
+        { records, count: records.length },
+        `Returned ${records.length} recent memor${records.length === 1 ? 'y' : 'ies'}.`,
+      );
     },
   );
 
@@ -347,11 +355,17 @@ export function createMemoryMcpServer(runtime: MemoryMcpRuntime): McpServer {
     'memory_resolve',
     {
       title: 'Resolve a memory',
-      description: 'Mark a memory as resolved or another explicit non-destructive lifecycle status.',
+      description:
+        'Mark a memory as resolved or another explicit non-destructive lifecycle status.',
       inputSchema: resolveInputSchema,
     },
     async (arguments_) => {
-      const record = await updateRecord(runtime, arguments_.id, { status: arguments_.status }, 'resolve');
+      const record = await updateRecord(
+        runtime,
+        arguments_.id,
+        { status: arguments_.status },
+        'resolve',
+      );
       return success({ record }, `Marked ${record.id} as ${record.status}.`);
     },
   );
@@ -360,7 +374,8 @@ export function createMemoryMcpServer(runtime: MemoryMcpRuntime): McpServer {
     'memory_checkpoint',
     {
       title: 'Create an explicit checkpoint',
-      description: 'Persist an explicit session checkpoint; this never reads or stores a transcript.',
+      description:
+        'Persist an explicit session checkpoint; this never reads or stores a transcript.',
       inputSchema: checkpointInputSchema,
     },
     async (arguments_) => {
@@ -397,7 +412,10 @@ export function createMemoryMcpServer(runtime: MemoryMcpRuntime): McpServer {
     },
     async (arguments_) => {
       const items = (await runtime.listInbox?.(arguments_.limit)) ?? [];
-      return success({ items, count: items.length }, `Inbox contains ${items.length} item${items.length === 1 ? '' : 's'}.`);
+      return success(
+        { items, count: items.length },
+        `Inbox contains ${items.length} item${items.length === 1 ? '' : 's'}.`,
+      );
     },
   );
 

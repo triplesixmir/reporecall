@@ -64,6 +64,23 @@ export const memoryRelationSchema = z
   })
   .strict();
 
+export const createMemoryInputSchema = z
+  .object({
+    content: z.string().trim().min(1),
+    scope: z.enum(MEMORY_SCOPES),
+    type: z.enum(MEMORY_TYPES),
+    priority: z.enum(MEMORY_PRIORITIES).optional(),
+    status: z.enum(MEMORY_STATUSES).optional(),
+    pinned: z.boolean().optional(),
+    tags: z.array(memoryTagSchema).optional(),
+    confidence: confidence.optional(),
+    project: projectRefSchema.optional(),
+    workspace: workspaceRefSchema.optional(),
+    source: memorySourceSchema.optional(),
+    relations: z.array(memoryRelationSchema).optional(),
+  })
+  .strict();
+
 export const memoryRecordSchema = z
   .object({
     schema: z.literal(MEMORY_SCHEMA_VERSION),
@@ -97,7 +114,6 @@ export const memoryRecordSchema = z
       }
       names.add(normalized);
     }
-
   });
 
 export type MemoryRecordInput = z.input<typeof memoryRecordSchema>;
@@ -203,7 +219,9 @@ export function migrateMemoryRecord(
 
   if (schema === undefined) throw new Error('Memory record schema is required');
   if (schema > MEMORY_SCHEMA_VERSION) {
-    throw new Error(`Memory schema ${schema} is newer than supported schema ${MEMORY_SCHEMA_VERSION}`);
+    throw new Error(
+      `Memory schema ${schema} is newer than supported schema ${MEMORY_SCHEMA_VERSION}`,
+    );
   }
   if (schema < 0) throw new Error(`Unsupported memory schema: ${schema}`);
 

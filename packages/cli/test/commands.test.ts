@@ -2,6 +2,7 @@ import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, test } from 'vitest';
+import { FileInboxStore } from '@reporecall/processors';
 import { runCli, type CliIO } from '../src/index.js';
 
 const roots: string[] = [];
@@ -35,9 +36,13 @@ describe('RepoRecall CLI', () => {
     const context = io(project, output, errors);
 
     await expect(runCli(['init', '--brain', brain], context)).resolves.toBe(0);
-    await expect(runCli(['remember', 'Keep this local project decision.', '--brain', brain], context)).resolves.toBe(0);
+    await expect(
+      runCli(['remember', 'Keep this local project decision.', '--brain', brain], context),
+    ).resolves.toBe(0);
     await expect(runCli(['rebuild', '--brain', brain], context)).resolves.toBe(0);
-    await expect(runCli(['search', 'local project decision', '--brain', brain], context)).resolves.toBe(0);
+    await expect(
+      runCli(['search', 'local project decision', '--brain', brain], context),
+    ).resolves.toBe(0);
 
     expect(output.join('\n')).toContain('Keep this local project decision.');
     await expect(readdir(join(project, '.reporecall', 'memories'))).resolves.toHaveLength(1);
@@ -53,8 +58,37 @@ describe('RepoRecall CLI', () => {
     const context = io(project, output, errors);
 
     await runCli(['init', '--brain', brain], context);
-    await expect(runCli(['remember', 'sk-proj-1234567890abcdef', '--brain', brain], context)).resolves.toBe(2);
+    await expect(
+      runCli(['remember', 'sk-proj-1234567890abcdef', '--brain', brain], context),
+    ).resolves.toBe(2);
     await expect(readdir(join(project, '.reporecall', 'memories'))).resolves.toEqual([]);
     expect(errors.join('\n')).toMatch(/secret|credential/i);
+  });
+
+  test('lists structured pending Inbox suggestions from canonical files', async () => {
+    const root = await fixture();
+    const project = join(root, 'project');
+    const brain = join(root, 'brain');
+    const output: string[] = [];
+    const errors: string[] = [];
+    const context = io(project, output, errors);
+
+    await runCli(['init', '--brain', brain], context);
+    const inbox = new FileInboxStore({ root: join(project, '.reporecall') });
+    await inbox.create({
+      suggested: {
+        content: 'Review this processor suggestion.',
+        scope: 'project',
+        type: 'decision',
+      },
+      reason: 'Needs a human decision.',
+    });
+
+    await expect(runCli(['inbox', '--brain', brain], context)).resolves.toBe(0);
+
+    const listed = JSON.parse(output.at(-1) ?? '[]') as Array<{ suggested: { content: string } }>;
+    expect(listed).toHaveLength(1);
+    expect(listed[0]?.suggested.content).toBe('Review this processor suggestion.');
+    expect(errors).toEqual([]);
   });
 });
