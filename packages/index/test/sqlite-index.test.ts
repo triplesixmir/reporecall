@@ -36,6 +36,27 @@ afterEach(async () => {
 });
 
 describe('SqliteMemoryIndex', () => {
+  test('rebuilds session checkpoints from the canonical sessions directory', async () => {
+    const root = await createFixture();
+    const record = createMemoryRecord(
+      {
+        content: 'Explicit checkpoint should survive an index rebuild.',
+        scope: 'session',
+        type: 'event',
+        source: { kind: 'user', method: 'checkpoint' },
+      },
+      { id: 'mem_session', now: '2026-08-13T12:00:00.000Z' },
+    );
+    const path = join(root, 'sessions', 'mem_session.md');
+    await mkdir(join(root, 'sessions'), { recursive: true });
+    await writeFile(path, serializeMemory(record), 'utf8');
+
+    const index = new SqliteMemoryIndex({ path: join(root, 'index.sqlite') });
+    await expect(index.rebuild([{ root, scope: 'session' }])).resolves.toMatchObject({ indexed: 1, invalid: [] });
+    await expect(index.search({ query: 'checkpoint', scope: 'session' })).resolves.toHaveLength(1);
+    index.close();
+  });
+
   test('rebuilds canonical files and searches FTS with metadata filters', async () => {
     const root = await createFixture();
     await writeMemory(root, 'mem_alpha', 'Canonical Markdown is the durable source of truth.');

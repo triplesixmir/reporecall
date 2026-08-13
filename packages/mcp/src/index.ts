@@ -1,2 +1,1 @@
-/** Public MCP package entrypoint. */
-export {};
+export * from './server.js';

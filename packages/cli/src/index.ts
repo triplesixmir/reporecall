@@ -1,4 +1,4 @@
-import { readdir } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 import { input } from '@inquirer/prompts';
 import {
@@ -9,7 +9,10 @@ import {
   type MemoryScope,
   type MemoryType,
 } from '@reporecall/core';
+import { DeterministicContextBuilder } from '@reporecall/context';
 import { SqliteMemoryIndex } from '@reporecall/index';
+import { runCodexHook, type CodexHookInput } from '@reporecall/integrations';
+import { runMcpStdio, type InboxItem, type MemoryMcpRuntime } from '@reporecall/mcp';
 import { FileMemoryStore } from '@reporecall/storage';
 import { initializeBrain, initializeProject } from './init.js';
 import {
@@ -116,10 +119,56 @@ function projectRef(cwd: string) {
 }
 
 function rootsFor(config: RepoRecallConfig) {
+  const project = projectRef(config.projectMemoryDir);
   return [
     { root: config.brainPath, scope: 'global' as const },
-    { root: config.projectMemoryDir, scope: 'project' as const, project: projectRef(config.projectMemoryDir) },
+    { root: config.projectMemoryDir, scope: 'project' as const, project },
+    { root: config.projectMemoryDir, scope: 'session' as const, project },
   ];
+}
+
+function memoryPath(root: string, id: string, scope: MemoryScope): string {
+  return join(root, scope === 'session' ? 'sessions' : 'memories', `${id}.md`);
+}
+
+async function inboxItems(config: RepoRecallConfig, limit: number): Promise<InboxItem[]> {
+  const items: InboxItem[] = [];
+  for (const root of [config.projectMemoryDir, config.brainPath]) {
+    const inboxRoot = join(root, 'inbox');
+    let entries;
+    try {
+      entries = await readdir(inboxRoot, { withFileTypes: true });
+    } catch (error) {
+      if (error instanceof Error && 'code' in error && error.code === 'ENOENT') continue;
+      throw error;
+    }
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
+      const path = join(inboxRoot, entry.name);
+      items.push({ id: entry.name.slice(0, -'.md'.length), path, content: await readFile(path, 'utf8') });
+    }
+  }
+  return items.sort((left, right) => left.id.localeCompare(right.id)).slice(0, limit);
+}
+
+function mcpRuntime(config: RepoRecallConfig): { runtime: MemoryMcpRuntime; index: SqliteMemoryIndex; close: () => void } {
+  const projectStore = new FileMemoryStore({ root: config.projectMemoryDir, scope: 'project' });
+  const globalStore = new FileMemoryStore({ root: config.brainPath, scope: 'global' });
+  const sessionStore = new FileMemoryStore({ root: config.projectMemoryDir, scope: 'session' });
+  const index = new SqliteMemoryIndex({ path: config.indexPath });
+  const contextBuilder = new DeterministicContextBuilder(index);
+  const runtime: MemoryMcpRuntime = {
+    store: projectStore,
+    stores: { global: globalStore, project: projectStore, session: sessionStore },
+    index,
+    contextBuilder,
+    afterWrite: async (record) => {
+      const root = record.scope === 'global' ? config.brainPath : config.projectMemoryDir;
+      await index.update([memoryPath(root, record.id, record.scope)]);
+    },
+    listInbox: (limit) => inboxItems(config, limit),
+  };
+  return { runtime, index, close: () => index.close() };
 }
 
 function storeFor(config: RepoRecallConfig, scope: MemoryScope): { store: FileMemoryStore; root: string } {
@@ -135,6 +184,15 @@ function parseEnum<T extends string>(value: string | undefined, allowed: readonl
 
 function printJson(context: CommandContext, value: unknown): void {
   context.stdout(`${JSON.stringify(value, null, 2)}\n`);
+}
+
+async function readStdin(): Promise<string> {
+  const chunks: string[] = [];
+  const stream = process.stdin as AsyncIterable<string | Uint8Array>;
+  for await (const chunk of stream) {
+    chunks.push(typeof chunk === 'string' ? chunk : new TextDecoder().decode(chunk));
+  }
+  return chunks.join('');
 }
 
 async function rememberCommand(
@@ -175,7 +233,7 @@ async function rememberCommand(
     source: { kind: 'user', method: forced === undefined ? 'cli' : 'checkpoint' },
   });
   const index = new SqliteMemoryIndex({ path: config.indexPath });
-  await index.update([join(root, 'memories', `${record.id}.md`)]);
+  await index.update([memoryPath(root, record.id, record.scope)]);
   index.close();
   context.stdout(`Remembered ${record.id}\n${record.content}\n`);
   return 0;
@@ -267,6 +325,66 @@ async function doctorCommand(context: CommandContext, flags: ParsedArgs['flags']
   return statusCommand(context, flags);
 }
 
+async function mcpCommand(context: CommandContext, flags: ParsedArgs['flags']): Promise<number> {
+  const config = await getConfig(context, flags);
+  const configured = mcpRuntime(config);
+  try {
+    await configured.index.rebuild(rootsFor(config));
+    await runMcpStdio(configured.runtime);
+    return 0;
+  } catch (error) {
+    configured.close();
+    throw error;
+  }
+}
+
+async function codexHookCommand(
+  context: CommandContext,
+  flags: ParsedArgs['flags'],
+  event: string | undefined,
+): Promise<number> {
+  try {
+    const source = await readStdin();
+    let hookInput: CodexHookInput = event === undefined ? {} : { hook_event_name: event };
+    if (source.trim() !== '') {
+      const parsed: unknown = JSON.parse(source);
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw new Error('Codex hook input must be a JSON object');
+      const parsedInput = parsed as CodexHookInput;
+      hookInput = { ...parsedInput, ...(event === undefined ? {} : { hook_event_name: event }) };
+    }
+    const hookCwd = typeof hookInput.cwd === 'string' && hookInput.cwd.trim() !== '' ? resolve(hookInput.cwd) : context.cwd;
+    const hookContext: CommandContext = { ...context, cwd: hookCwd };
+    const config = await getConfig(hookContext, flags);
+    const project = projectRef(hookCwd);
+    if (hookInput.hook_event_name === 'SessionEnd') {
+      return await runCodexHook(hookInput, {
+        projectRoot: project.root,
+        projectId: project.id,
+        projectName: project.name,
+        runtimeRoot: config.projectMemoryDir,
+      }, { stdout: context.stdout, stderr: context.stderr });
+    }
+
+    const index = new SqliteMemoryIndex({ path: config.indexPath });
+    try {
+      await index.rebuild(rootsFor(config));
+      return await runCodexHook(hookInput, {
+        contextBuilder: new DeterministicContextBuilder(index),
+        projectRoot: project.root,
+        projectId: project.id,
+        projectName: project.name,
+        runtimeRoot: config.projectMemoryDir,
+        tokenBudget: numberFlag(flags, 'token-budget') ?? 2_000,
+      }, { stdout: context.stdout, stderr: context.stderr });
+    } finally {
+      index.close();
+    }
+  } catch (error) {
+    context.stderr(`RepoRecall hook failed open: ${error instanceof Error ? error.message : String(error)}\n`);
+    return 0;
+  }
+}
+
 export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
   const context: CommandContext = {
     cwd: resolve(io.cwd ?? process.cwd()),
@@ -278,7 +396,7 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
   const command = positionals[0];
   try {
     if (command === undefined || command === 'help' || booleanFlag(flags, 'help')) {
-      context.stdout('RepoRecall commands: init, brain init, status, doctor, remember, search, inbox, rebuild, config, checkpoint\n');
+      context.stdout('RepoRecall commands: init, brain init, status, doctor, remember, search, inbox, rebuild, config, checkpoint, mcp, codex-hook\n');
       return 0;
     }
     if (command === 'init') return initCommand(context, flags);
@@ -306,6 +424,8 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
     if (command === 'status') return statusCommand(context, flags);
     if (command === 'doctor') return doctorCommand(context, flags);
     if (command === 'inbox') return inboxCommand(context, flags);
+    if (command === 'mcp') return mcpCommand(context, flags);
+    if (command === 'codex-hook') return codexHookCommand(context, flags, positionals[1]);
     if (command === 'config') printJson(context, await getConfig(context, flags));
     else throw new Error(`Unknown command: ${command}`);
     return 0;

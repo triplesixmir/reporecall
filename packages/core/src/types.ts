@@ -239,6 +239,23 @@ export type MemoryStore = {
   validateAll(): Promise<ValidationReport>;
 };
 
+export type AdapterTarget = {
+  scope: 'user' | 'project';
+  projectRoot?: string;
+  codexHome?: string;
+};
+
+export type InstallationReport = {
+  changed: boolean;
+  paths: string[];
+  warnings: string[];
+};
+
+export type AgentAdapter = {
+  install(target: AdapterTarget): Promise<InstallationReport>;
+  uninstall(target: AdapterTarget): Promise<InstallationReport>;
+};
+
 export type MemoryMigrationOptions = {
   now?: string;
 };

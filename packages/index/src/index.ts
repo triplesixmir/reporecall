@@ -196,8 +196,8 @@ function toRecord(row: MemoryRow, tags: TagRow[], relations: RelationRow[]): Mem
   };
 }
 
-function memoriesPath(root: string): string {
-  return resolve(root, 'memories');
+function recordsPath(root: string, scope: MemorySourceRoot['scope']): string {
+  return resolve(root, scope === 'session' ? 'sessions' : 'memories');
 }
 
 export class SqliteMemoryIndex implements MemoryIndex {
@@ -228,7 +228,7 @@ export class SqliteMemoryIndex implements MemoryIndex {
   private async listSourceFiles(sources: MemorySourceRoot[]): Promise<string[]> {
     const paths = new Set<string>();
     for (const source of sources) {
-      const root = memoriesPath(source.root);
+      const root = recordsPath(source.root, source.scope);
       let entries;
       try {
         entries = await readdir(root, { withFileTypes: true });

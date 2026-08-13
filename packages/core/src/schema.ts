@@ -163,7 +163,7 @@ export function updateMemoryRecord(
       ? patch.tags === undefined
         ? record.tags
         : normalizeTags(patch.tags)
-      : normalizeTags([...record.tags, ...patch.tags]);
+      : normalizeTags([...record.tags, ...patch.tags.filter((tag) => tag.origin === 'ai')]);
   const next = {
     ...record,
     ...patch,

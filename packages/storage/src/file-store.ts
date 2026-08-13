@@ -57,21 +57,21 @@ function matchesFilters(record: MemoryRecord, filters: MemoryFilters = {}): bool
 export class FileMemoryStore implements MemoryStore {
   readonly root: string;
   readonly scope: MemoryScope;
-  private readonly memoriesDir: string;
+  private readonly recordsDir: string;
 
   constructor(options: FileMemoryStoreOptions) {
     this.root = options.root;
     this.scope = options.scope ?? 'project';
-    this.memoriesDir = join(this.root, 'memories');
+    this.recordsDir = join(this.root, this.scope === 'session' ? 'sessions' : 'memories');
   }
 
   private pathFor(id: string): string {
     if (!isMemoryId(id)) throw new Error(`Invalid memory id: ${id}`);
-    return join(this.memoriesDir, `${id}.md`);
+    return join(this.recordsDir, `${id}.md`);
   }
 
   private async ensureDirectories(): Promise<void> {
-    await mkdir(this.memoriesDir, { recursive: true });
+    await mkdir(this.recordsDir, { recursive: true });
   }
 
   private async atomicWrite(path: string, content: string): Promise<void> {
@@ -86,11 +86,11 @@ export class FileMemoryStore implements MemoryStore {
 
   private async readRecords(): Promise<Array<{ path: string; record: MemoryRecord }>> {
     await this.ensureDirectories();
-    const entries = await readdir(this.memoriesDir, { withFileTypes: true });
+    const entries = await readdir(this.recordsDir, { withFileTypes: true });
     const records: Array<{ path: string; record: MemoryRecord }> = [];
     for (const entry of entries) {
       if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
-      const path = join(this.memoriesDir, entry.name);
+      const path = join(this.recordsDir, entry.name);
       const source = await readFile(path, 'utf8');
       records.push({ path, record: parseMemoryFile(source, path) });
     }
@@ -140,11 +140,11 @@ export class FileMemoryStore implements MemoryStore {
 
   async validateAll(): Promise<ValidationReport> {
     await this.ensureDirectories();
-    const entries = await readdir(this.memoriesDir, { withFileTypes: true });
+    const entries = await readdir(this.recordsDir, { withFileTypes: true });
     const report: ValidationReport = { valid: 0, invalid: [] };
     for (const entry of entries) {
       if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
-      const path = join(this.memoriesDir, entry.name);
+      const path = join(this.recordsDir, entry.name);
       try {
         const source = await readFile(path, 'utf8');
         const parsed = parseMemoryFile(source, path);
@@ -162,12 +162,12 @@ export class FileMemoryStore implements MemoryStore {
 
   async migrateAll(options: MemoryMigrationOptions = {}): Promise<FileMigrationReport> {
     await this.ensureDirectories();
-    const entries = await readdir(this.memoriesDir, { withFileTypes: true });
+    const entries = await readdir(this.recordsDir, { withFileTypes: true });
     const report: FileMigrationReport = { migrated: 0, unchanged: 0, backups: [], invalid: [] };
 
     for (const entry of entries) {
       if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
-      const path = join(this.memoriesDir, entry.name);
+      const path = join(this.recordsDir, entry.name);
       try {
         const source = await readFile(path, 'utf8');
         const result = parseMemoryFileWithMigration(source, path, options);

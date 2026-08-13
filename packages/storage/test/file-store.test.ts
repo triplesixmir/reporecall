@@ -11,6 +11,20 @@ async function createStore() {
 }
 
 describe('FileMemoryStore', () => {
+  test('stores durable session checkpoints in the sessions directory', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'reporecall-session-store-'));
+    const store = new FileMemoryStore({ root, scope: 'session' });
+    const record = await store.create({
+      content: 'Explicit checkpoint only.',
+      scope: 'session',
+      type: 'event',
+      source: { kind: 'user', method: 'checkpoint' },
+    });
+
+    await expect(readFile(join(root, 'sessions', `${record.id}.md`), 'utf8')).resolves.toContain('Explicit checkpoint only.');
+    await expect(readdir(join(root, 'memories'))).rejects.toThrow();
+  });
+
   test('creates and lists an inspectable Markdown memory file', async () => {
     const { root, store } = await createStore();
 
