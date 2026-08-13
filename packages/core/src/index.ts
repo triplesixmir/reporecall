@@ -1,2 +1,3 @@
-/** Public core package entrypoint; domain contracts are added in the next vertical slice. */
-export {};
+export * from './schema.js';
+export * from './serialization.js';
+export * from './types.js';

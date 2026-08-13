@@ -1,10 +1,7 @@
 {
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    "noEmit": true,
-    "allowJs": false,
     "baseUrl": ".",
-    "rootDir": ".",
     "paths": {
       "@reporecall/core": ["packages/core/src/index.ts"],
       "@reporecall/storage": ["packages/storage/src/index.ts"],
@@ -13,8 +10,12 @@
       "@reporecall/integrations": ["packages/integrations/src/index.ts"],
       "@reporecall/processors": ["packages/processors/src/index.ts"],
       "@reporecall/mcp": ["packages/mcp/src/index.ts"]
-    }
+    },
+    "rootDir": ".",
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false
   },
-  "include": ["**/*.ts", "**/*.tsx"],
-  "exclude": ["**/node_modules/**", "**/dist/**", "**/coverage/**", "**/test-results/**"]
+  "include": ["packages/*/src/**/*.ts", "apps/web/src/**/*.ts", "apps/web/src/**/*.tsx"]
 }
