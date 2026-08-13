@@ -10,7 +10,7 @@ import {
 } from '@reporecall/core';
 import { DeterministicContextBuilder } from '@reporecall/context';
 import { SqliteMemoryIndex } from '@reporecall/index';
-import { runCodexHook, type CodexHookInput } from '@reporecall/integrations';
+import { CodexAdapter, runCodexHook, type CodexHookInput } from '@reporecall/integrations';
 import { runMcpStdio, type InboxItem, type MemoryMcpRuntime } from '@reporecall/mcp';
 import { FileInboxStore } from '@reporecall/processors';
 import { FileMemoryStore } from '@reporecall/storage';
@@ -395,6 +395,28 @@ async function serveCommand(context: CommandContext, flags: ParsedArgs['flags'])
   });
 }
 
+async function codexAdapterCommand(
+  context: CommandContext,
+  flags: ParsedArgs['flags'],
+  action: 'install' | 'uninstall',
+): Promise<number> {
+  const scope = parseEnum(stringFlag(flags, 'scope'), ['user', 'project'] as const, 'scope') ?? 'user';
+  const codexExecutable =
+    stringFlag(flags, 'codex-executable') ?? process.env.REPORECALL_CODEX_EXECUTABLE ?? 'codex';
+  const serverCommand = stringFlag(flags, 'server-command') ?? 'reporecall';
+  const hookExecutable = stringFlag(flags, 'hook-executable') ?? 'reporecall';
+  const codexHome = stringFlag(flags, 'codex-home');
+  const adapter = new CodexAdapter({ codexExecutable, serverCommand, hookExecutable });
+  const target = {
+    scope,
+    projectRoot: context.cwd,
+    ...(codexHome === undefined ? {} : { codexHome }),
+  } as const;
+  const report = action === 'install' ? await adapter.install(target) : await adapter.uninstall(target);
+  printJson(context, report);
+  return 0;
+}
+
 async function codexHookCommand(
   context: CommandContext,
   flags: ParsedArgs['flags'],
@@ -468,7 +490,7 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
   try {
     if (command === undefined || command === 'help' || booleanFlag(flags, 'help')) {
       context.stdout(
-        'RepoRecall commands: init, brain init, status, doctor, remember, search, inbox, rebuild, config, checkpoint, serve, mcp, codex-hook\n',
+        'RepoRecall commands: init, brain init, status, doctor, remember, search, inbox, rebuild, config, checkpoint, serve, mcp, codex install, codex uninstall, codex-hook\n',
       );
       return 0;
     }
@@ -502,6 +524,9 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
     if (command === 'inbox') return inboxCommand(context, flags);
     if (command === 'serve') return serveCommand(context, flags);
     if (command === 'mcp') return mcpCommand(context, flags);
+    if (command === 'codex' && (positionals[1] === 'install' || positionals[1] === 'uninstall')) {
+      return codexAdapterCommand(context, flags, positionals[1]);
+    }
     if (command === 'codex-hook') return codexHookCommand(context, flags, positionals[1]);
     if (command === 'config') printJson(context, await getConfig(context, flags));
     else throw new Error(`Unknown command: ${command}`);

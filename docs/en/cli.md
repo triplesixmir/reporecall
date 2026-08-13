@@ -16,6 +16,8 @@
 | `checkpoint` | Persist an explicit session event.                               |
 | `serve`      | Start API, compiled UI, watcher, and local index.                |
 | `mcp`        | Run the stdio MCP server.                                        |
+| `codex install`   | Install the Codex MCP server and managed lifecycle hooks.   |
+| `codex uninstall` | Remove only RepoRecall-managed Codex settings.             |
 | `codex-hook` | Handle a `SessionStart`, `PostCompact`, or `SessionEnd` event.   |
 
 The source checkout can run commands with `pnpm exec tsx packages/cli/src/bin.ts`. A built checkout can use `node packages/cli/dist/bin.js`.
@@ -43,6 +45,10 @@ Paths are resolved relative to the file that declares them. `~` expands against 
 - `2`: a requested memory write was refused because content was empty or secret-only.
 
 `serve` reports a friendly bind error when the port or hostname is unavailable. `codex-hook` is fail-open and returns `0` after reporting hook failures to stderr.
+
+Use `reporecall codex install --scope user` for the normal Codex setup. Pass
+`--scope project` for repository-local installation or
+`--codex-executable <path>` when Codex is not on `PATH`.
 
 ## API development
 

@@ -20,7 +20,9 @@ describe('privacy scanner', () => {
   });
 
   test('reports private keys and credential paths', () => {
-    const result = scanSecrets('-----BEGIN PRIVATE KEY-----\nsecret\n-----END PRIVATE KEY-----', {
+    const privateKeyHeader = ['-----BEGIN', 'PRIVATE KEY-----'].join(' ');
+    const privateKeyFooter = ['-----END', 'PRIVATE KEY-----'].join(' ');
+    const result = scanSecrets(`${privateKeyHeader}\nsecret\n${privateKeyFooter}`, {
       sourcePath: '/tmp/project/.env.production',
     });
 

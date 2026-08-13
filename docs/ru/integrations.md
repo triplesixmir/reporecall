@@ -16,10 +16,19 @@ MCP writes используют те же canonical stores и secret redaction, 
 
 Adapter поддерживает user-level и project-level installation через официальный Codex MCP command и managed config files. Installation idempotent:
 
+```bash
+reporecall codex install --scope user
+# или только для одного репозитория:
+reporecall codex install --scope project
+```
+
 - `codex mcp add` регистрирует local stdio server;
 - managed `AGENTS.md` block объясняет source-of-truth и privacy semantics;
 - managed `hooks.json` inject-ит context на `SessionStart` и `PostCompact`, lifecycle marker — на `SessionEnd`;
 - unrelated user text и hook handlers сохраняются.
+
+Для удаления интеграции используйте `reporecall codex uninstall --scope user`
+(или `--scope project`). Удаляются только managed entries RepoRecall.
 
 Hook fail-open. Если index или context builder недоступен, session продолжается, а hook пишет diagnostic, не блокируя agent.
 

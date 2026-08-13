@@ -16,10 +16,19 @@ MCP writes use the same canonical stores and secret redaction as the CLI. Agents
 
 The adapter supports user-level or project-level installation through the official Codex MCP command and managed configuration files. Installation is designed to be idempotent:
 
+```bash
+reporecall codex install --scope user
+# or, for one repository only:
+reporecall codex install --scope project
+```
+
 - `codex mcp add` registers the local stdio server;
 - a managed `AGENTS.md` block explains source-of-truth and privacy semantics;
 - managed `hooks.json` entries inject context at `SessionStart` and `PostCompact` and write a lifecycle marker at `SessionEnd`;
 - unrelated user text and hook handlers remain intact.
+
+To remove the integration, run `reporecall codex uninstall --scope user` (or
+`--scope project`). Only RepoRecall-managed entries are removed.
 
 The hook executable is fail-open. If the index or context builder is unavailable, the session continues and the hook reports a diagnostic instead of blocking the agent.
 

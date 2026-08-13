@@ -2,6 +2,9 @@
 
 > Persistent memory for AI agents, stored where you control it.
 
+[![CI](https://github.com/triplesixmir/reporecall/actions/workflows/ci.yml/badge.svg)](https://github.com/triplesixmir/reporecall/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 RepoRecall is a local-first, model-agnostic memory layer for coding agents. It keeps durable memories as readable Markdown files with YAML frontmatter, stores the fast search index in disposable SQLite, and exposes the same contract through a CLI, local API, MCP, and Codex hooks.
 
 The important boundary is simple: Markdown is the source of truth. SQLite can be deleted and rebuilt at any time.
@@ -24,7 +27,7 @@ The important boundary is simple: Markdown is the source of truth. SQLite can be
 Requirements: Node.js `>=22.12.0` and pnpm 11.
 
 ```bash
-git clone <your-repo-url> reporecall
+git clone https://github.com/triplesixmir/reporecall.git reporecall
 cd reporecall
 pnpm install --frozen-lockfile
 pnpm check
@@ -42,6 +45,18 @@ pnpm build
 node packages/cli/dist/bin.js doctor
 node packages/cli/dist/bin.js status
 ```
+
+Install the Codex integration for the current user (MCP registration, managed
+instructions, and lifecycle hooks):
+
+```bash
+reporecall codex install --scope user
+reporecall doctor
+```
+
+Use `--scope project` to keep the integration inside one repository. If the
+Codex executable is not on `PATH`, pass its path with
+`--codex-executable /path/to/codex`.
 
 ## File-first storage
 
@@ -90,6 +105,8 @@ reporecall config               print resolved configuration
 reporecall checkpoint <summary> persist an explicit session checkpoint
 reporecall serve                run the loopback API, UI, and watcher
 reporecall mcp                  run the stdio MCP server
+reporecall codex install       install the Codex MCP server and managed hooks
+reporecall codex uninstall     remove only RepoRecall-managed Codex settings
 reporecall codex-hook <event>   handle a Codex lifecycle hook
 ```
 
@@ -101,7 +118,13 @@ Paths and behavior can be changed with CLI flags or TOML configuration. Preceden
 
 The MCP server is model-agnostic and returns both structured data and a short human-readable summary. MCP writes preserve user-owned tags and run the same redaction rules as the CLI.
 
-The Codex adapter installs the MCP command and managed blocks without overwriting user text or unrelated hooks. `SessionStart` and `PostCompact` inject deterministic context. `SessionEnd` writes only a lifecycle marker. Hook failures are fail-open, and no unstable transcript format is required.
+The Codex adapter installs the MCP command and managed blocks without overwriting user text or unrelated hooks. `reporecall codex install --scope user` is the supported entry point; `SessionStart` and `PostCompact` inject deterministic context. `SessionEnd` writes only a lifecycle marker. Hook failures are fail-open, and no unstable transcript format is required.
+
+This is automatic context retrieval, not silent memory creation. An agent can
+write a durable record explicitly with `memory_remember` or `reporecall
+remember`; a durable session summary requires an explicit checkpoint. The
+default processor is disabled for privacy. Enable a processor deliberately if
+you want suggestions in Inbox.
 
 ## Privacy and processors
 
@@ -129,6 +152,31 @@ The graph is a projection of indexed relations. It is not another storage system
 5. The same context builder retrieves the shared Markdown memory without copying SQLite or machine-specific paths.
 
 Keep private global memories out of public repositories. Use private remotes when project memory contains sensitive context.
+
+For a personal multi-device setup, keep these repositories separate:
+
+| Repository | Visibility | Contents |
+| ---------- | ---------- | -------- |
+| `triplesixmir/reporecall` | public | source, tests, CI, bilingual documentation |
+| `triplesixmir/reporecall-private-memory` | private | your Markdown brain and safe RepoRecall config |
+
+On a fresh Windows machine, clone the private brain first and then initialize
+the project that should use it:
+
+```powershell
+$Brain = Join-Path $env:USERPROFILE ".reporecall\brain"
+git clone git@github.com:triplesixmir/reporecall-private-memory.git $Brain
+reporecall brain init --brain $Brain
+cd C:\path\to\your-project
+reporecall init --yes --brain $Brain
+reporecall rebuild --brain $Brain
+reporecall codex install --scope user
+reporecall doctor
+```
+
+The public source checkout is installed separately with Node.js and pnpm. Pull
+the private brain before using a second machine, and push only after reviewing
+the Markdown changes. Do not copy or commit SQLite files.
 
 ## Limitations and roadmap
 

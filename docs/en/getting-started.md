@@ -23,6 +23,17 @@ This is idempotent. It creates `.reporecall/`, writes configuration, and adds a 
 
 For a non-Git directory, initialization still works. Git is useful for syncing project Markdown, but is not required by the storage layer.
 
+After installing the CLI, connect Codex:
+
+```bash
+reporecall codex install --scope user
+reporecall doctor
+```
+
+This makes Codex retrieve current context at session start and after compaction.
+It does not silently turn a transcript into durable memory; use an explicit
+`remember` or `checkpoint` write when something should persist.
+
 ## 3. Create and find memory
 
 ```bash
@@ -68,3 +79,23 @@ CLI flags -> project config -> brain config -> user config -> defaults
 ```
 
 Useful flags include `--brain`, `--memory-dir`, `--index`, `--port`, `--ignore`, `--processor`, and `--processor-mode`. Run `config` to inspect the final resolved paths before writing data.
+
+## Private brain repository
+
+For cross-device use, keep the public source repository separate from a private
+brain repository. On a fresh Windows device:
+
+```powershell
+$Brain = Join-Path $env:USERPROFILE ".reporecall\brain"
+git clone git@github.com:triplesixmir/reporecall-private-memory.git $Brain
+reporecall brain init --brain $Brain
+cd C:\path\to\your-project
+reporecall init --yes --brain $Brain
+reporecall rebuild --brain $Brain
+reporecall codex install --scope user
+```
+
+The Markdown memories are the portable data. The SQLite index is local cache:
+pull the Markdown, then rebuild the index on each device. RepoRecall retrieves
+context automatically through the Codex hooks, but it does not silently save a
+transcript as durable memory.

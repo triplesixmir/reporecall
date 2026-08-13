@@ -2,6 +2,14 @@
   "name": "reporecall",
   "version": "0.1.0",
   "description": "Persistent, local-first memory for AI agents.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/triplesixmir/reporecall.git"
+  },
+  "homepage": "https://github.com/triplesixmir/reporecall#readme",
+  "bugs": {
+    "url": "https://github.com/triplesixmir/reporecall/issues"
+  },
   "type": "module",
   "bin": {
     "reporecall": "./dist/bin.js"

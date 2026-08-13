@@ -6,6 +6,7 @@
 pnpm install --frozen-lockfile
 pnpm check
 pnpm test:e2e
+pnpm audit:public -- --working-tree
 pnpm --dir packages/cli pack --pack-destination /tmp/reporecall-release
 ```
 
@@ -37,5 +38,6 @@ npx --no-install reporecall init --yes
 - нет credentials, private keys, bearer tokens и provider secrets;
 - нет machine-specific paths и private memory files;
 - нет generated SQLite, runtime markers, browser artifacts и build output;
+- `pnpm audit:public -- --working-tree` не находит sensitive paths или values;
 - English и Russian docs описывают реализованное и limitations;
 - CI выполняет install, lint, typecheck, unit tests, E2E и build на Ubuntu, macOS и Windows.

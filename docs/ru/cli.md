@@ -16,6 +16,8 @@
 | `checkpoint` | Сохранить явный session event.                                 |
 | `serve`      | Запустить API, compiled UI, watcher и local index.             |
 | `mcp`        | Запустить stdio MCP server.                                    |
+| `codex install`   | Установить Codex MCP и managed lifecycle hooks.            |
+| `codex uninstall` | Удалить только настройки RepoRecall в Codex.               |
 | `codex-hook` | Обработать `SessionStart`, `PostCompact` или `SessionEnd`.     |
 
 В checkout используйте `pnpm exec tsx packages/cli/src/bin.ts`. После build — `node packages/cli/dist/bin.js`.
@@ -43,6 +45,10 @@ Relative paths разрешаются относительно config file, ко
 - `2`: memory write отклонён из-за empty или secret-only content.
 
 `serve` даёт понятную ошибку, если hostname или port недоступны. `codex-hook` fail-open и возвращает `0`, сообщая об ошибке в stderr.
+
+Обычная команда установки Codex — `reporecall codex install --scope user`.
+Для установки только в одном репозитории используйте `--scope project`. Если
+Codex не находится в `PATH`, передайте `--codex-executable <path>`.
 
 ## API development
 

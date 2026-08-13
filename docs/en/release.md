@@ -6,6 +6,7 @@ Run the following from a clean checkout before publishing:
 pnpm install --frozen-lockfile
 pnpm check
 pnpm test:e2e
+pnpm audit:public -- --working-tree
 pnpm --dir packages/cli pack --pack-destination /tmp/reporecall-release
 ```
 
@@ -37,5 +38,6 @@ Before a public repository or release:
 - no credentials, private keys, bearer tokens, or provider secrets;
 - no machine-specific paths or personal memory files;
 - no generated SQLite, runtime markers, browser artifacts, or build output;
+- `pnpm audit:public -- --working-tree` reports no sensitive paths or values;
 - English and Russian documentation describe the implemented behavior and limitations;
 - CI runs install, lint, typecheck, unit tests, E2E, and build on Ubuntu, macOS, and Windows.

@@ -23,6 +23,17 @@ pnpm exec tsx packages/cli/src/bin.ts init --yes
 
 Инициализация работает и в non-Git directory. Git нужен для синхронизации project Markdown, но не является требованием storage layer.
 
+После установки CLI подключите Codex:
+
+```bash
+reporecall codex install --scope user
+reporecall doctor
+```
+
+После этого Codex получает актуальный context при старте сессии и после
+compaction. Transcript не превращается в durable memory молча: для сохранения
+используйте явные `remember` или `checkpoint`.
+
 ## 3. Создание и поиск memory
 
 ```bash
@@ -68,3 +79,23 @@ CLI flags -> project config -> brain config -> user config -> defaults
 ```
 
 Полезные flags: `--brain`, `--memory-dir`, `--index`, `--port`, `--ignore`, `--processor`, `--processor-mode`. Перед write запускайте `config`, чтобы увидеть итоговые paths.
+
+## Private brain repository
+
+Для работы на нескольких устройствах отделите public source repository от
+private brain repository. На новом Windows-компьютере:
+
+```powershell
+$Brain = Join-Path $env:USERPROFILE ".reporecall\brain"
+git clone git@github.com:triplesixmir/reporecall-private-memory.git $Brain
+reporecall brain init --brain $Brain
+cd C:\path\to\your-project
+reporecall init --yes --brain $Brain
+reporecall rebuild --brain $Brain
+reporecall codex install --scope user
+```
+
+Переносимыми данными являются Markdown memories. SQLite — local cache: на
+каждом устройстве подтяните Markdown и пересоберите index. Codex hooks сами
+подтягивают context, но RepoRecall не сохраняет transcript в durable memory
+молча.

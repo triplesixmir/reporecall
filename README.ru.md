@@ -2,6 +2,9 @@
 
 > Постоянная память для AI-агентов, хранящаяся там, где её контролируете вы.
 
+[![CI](https://github.com/triplesixmir/reporecall/actions/workflows/ci.yml/badge.svg)](https://github.com/triplesixmir/reporecall/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 RepoRecall — локальный, независимый от модели слой памяти для coding agents. Durable-записи хранятся в читаемых Markdown-файлах с YAML frontmatter, быстрый локальный индекс — в удаляемом SQLite, а единый контракт доступен через CLI, локальный API, MCP и Codex hooks.
 
 Главная граница системы проста: Markdown — единственный source of truth. SQLite можно удалить и полностью восстановить в любой момент.
@@ -24,7 +27,7 @@ RepoRecall — локальный, независимый от модели сл
 Требования: Node.js `>=22.12.0` и pnpm 11.
 
 ```bash
-git clone <your-repo-url> reporecall
+git clone https://github.com/triplesixmir/reporecall.git reporecall
 cd reporecall
 pnpm install --frozen-lockfile
 pnpm check
@@ -42,6 +45,18 @@ pnpm build
 node packages/cli/dist/bin.js doctor
 node packages/cli/dist/bin.js status
 ```
+
+Установить интеграцию с Codex для текущего пользователя (MCP, managed
+instructions и lifecycle hooks):
+
+```bash
+reporecall codex install --scope user
+reporecall doctor
+```
+
+`--scope project` ограничивает интеграцию одним репозиторием. Если executable
+Codex не находится в `PATH`, укажите его через
+`--codex-executable /path/to/codex`.
 
 ## File-first storage
 
@@ -90,6 +105,8 @@ reporecall config               показать resolved configuration
 reporecall checkpoint <summary> сохранить явный session checkpoint
 reporecall serve                запустить loopback API, UI и watcher
 reporecall mcp                  запустить stdio MCP server
+reporecall codex install       установить Codex MCP и managed hooks
+reporecall codex uninstall     удалить только настройки RepoRecall в Codex
 reporecall codex-hook <event>   обработать Codex lifecycle hook
 ```
 
@@ -101,7 +118,13 @@ reporecall codex-hook <event>   обработать Codex lifecycle hook
 
 MCP server model-agnostic и возвращает structured data вместе с коротким human-readable summary. MCP writes сохраняют user-owned tags и используют те же redaction rules, что CLI.
 
-Codex adapter устанавливает MCP command и managed blocks, не перезаписывая пользовательский текст и unrelated hooks. `SessionStart` и `PostCompact` инжектируют детерминированный context. `SessionEnd` пишет только lifecycle marker. При ошибке hook работает fail-open и не зависит от нестабильного transcript format.
+Codex adapter устанавливает MCP command и managed blocks, не перезаписывая пользовательский текст и unrelated hooks. Поддерживаемая точка входа — `reporecall codex install --scope user`; `SessionStart` и `PostCompact` инжектируют детерминированный context. `SessionEnd` пишет только lifecycle marker. При ошибке hook работает fail-open и не зависит от нестабильного transcript format.
+
+Это automatic retrieval контекста, а не тихое создание памяти. Agent явно пишет
+durable record через `memory_remember` или `reporecall remember`; durable summary
+сессии появляется только после явного checkpoint. По умолчанию processor отключён
+ради privacy. Если нужны suggestions, processor включается отдельно и пишет их
+в Inbox.
 
 ## Privacy и processors
 
@@ -129,6 +152,32 @@ Graph — projection indexed relations, а не отдельное хранил�
 5. Тот же context builder получает memory из Markdown без копирования SQLite и machine-specific paths.
 
 Private global memories не должны попадать в public repositories. Для sensitive project memory используйте private remotes.
+
+Для личной работы на нескольких устройствах держите два репозитория
+раздельно:
+
+| Репозиторий | Visibility | Содержимое |
+| ----------- | ---------- | ---------- |
+| `triplesixmir/reporecall` | public | source, tests, CI, bilingual documentation |
+| `triplesixmir/reporecall-private-memory` | private | ваш Markdown brain и safe RepoRecall config |
+
+На новом Windows-компьютере сначала клонируйте private brain, затем подключите
+его к проекту:
+
+```powershell
+$Brain = Join-Path $env:USERPROFILE ".reporecall\brain"
+git clone git@github.com:triplesixmir/reporecall-private-memory.git $Brain
+reporecall brain init --brain $Brain
+cd C:\path\to\your-project
+reporecall init --yes --brain $Brain
+reporecall rebuild --brain $Brain
+reporecall codex install --scope user
+reporecall doctor
+```
+
+Public source checkout устанавливается отдельно через Node.js и pnpm. Перед
+работой на втором устройстве подтяните private brain, а перед push проверьте
+изменения Markdown. SQLite нельзя копировать или коммитить.
 
 ## Ограничения и roadmap
 
