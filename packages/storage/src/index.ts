@@ -1,2 +1,1 @@
-/** Public storage package entrypoint. */
-export {};
+export * from './file-store.js';
