@@ -1,0 +1,4 @@
+brain_path = "~/.reporecall/brain"
+index_path = "index.sqlite"
+processor = "disabled"
+processor_mode = "conservative"
