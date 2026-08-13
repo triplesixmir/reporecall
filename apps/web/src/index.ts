@@ -1,2 +1,1 @@
-/** Web application entrypoint placeholder for the UI vertical slice. */
-export {};
+export { App } from './app.js';

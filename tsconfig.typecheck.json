@@ -12,6 +12,7 @@
       "@reporecall/mcp": ["packages/mcp/src/index.ts"]
     },
     "rootDir": ".",
+    "jsx": "react-jsx",
     "composite": false,
     "declaration": false,
     "declarationMap": false,
