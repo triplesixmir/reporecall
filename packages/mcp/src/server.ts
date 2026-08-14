@@ -29,8 +29,9 @@ import {
 
 export const REPORECALL_MCP_INSTRUCTIONS = [
   'RepoRecall is a local-first memory layer. Canonical Markdown files with YAML frontmatter are the durable source of truth; SQLite is only a disposable local index.',
+  'At the beginning of work, use context injected by SessionStart or PostCompact; call memory_get_context for deeper query-specific recall. Before the final response of a meaningful task, use memory_auto_capture once with a concise redacted summary and structured memories for reusable facts, preferences, decisions, goals, todos, constraints, or insights. Skip trivial turns and do not ask the user to run a memory command.',
+  'memory_auto_capture is the normal agent-native capture path. memory_process remains the lower-level processor workflow for an explicitly supplied redacted capture. Neither tool reads or stores raw transcripts; provider suggestions follow the configured processor mode and conservative mode sends them to Inbox.',
   'Use memory_remember and memory_update for explicit durable writes. memory_checkpoint is the only tool that creates a durable session event; session hooks never summarize transcripts automatically.',
-  'memory_process accepts only an explicitly supplied redacted capture. It never reads or stores raw transcripts; automatic persistence requires an explicit allowAutomatic request and conservative mode sends processor suggestions to Inbox.',
   'Never write secrets, credentials, private keys, or raw transcripts. User-owned tags are preserved when an agent updates a memory.',
 ].join(' ');
 
@@ -145,6 +146,17 @@ const processInputSchema = {
   allowAutomatic: z.boolean().default(false),
 };
 
+const autoCaptureInputSchema = {
+  content: z.string().min(1),
+  memories: z.array(createMemoryInputSchema).max(20).default([]),
+  capturedAt: z.iso.datetime({ offset: true }).optional(),
+  sessionId: z.string().min(1).optional(),
+  source: memorySourceSchema.optional(),
+  ...projectFields,
+  workspaceId: z.string().min(1).optional(),
+  workspaceName: z.string().min(1).optional(),
+};
+
 function success<T extends Record<string, unknown>>(data: T, summary: string): CallToolResult {
   return {
     structuredContent: data,
@@ -170,6 +182,29 @@ function agentTags(tags: InputTag[] | undefined): MemoryTag[] | undefined {
     origin: 'ai' as const,
     ...(tag.confidence === undefined ? {} : { confidence: tag.confidence }),
   }));
+}
+
+function automaticCandidates(
+  memories: Array<z.input<typeof createMemoryInputSchema>>,
+): CreateMemoryInput[] {
+  return memories.map((memory) => {
+    const parsed = createMemoryInputSchema.parse(memory) as CreateMemoryInput;
+    const tags = parsed.tags === undefined ? undefined : (agentTags(parsed.tags) ?? []);
+    return {
+      content: parsed.content,
+      scope: parsed.scope,
+      type: parsed.type,
+      ...(parsed.priority === undefined ? {} : { priority: parsed.priority }),
+      ...(parsed.status === undefined ? {} : { status: parsed.status }),
+      ...(parsed.pinned === undefined ? {} : { pinned: parsed.pinned }),
+      ...(tags === undefined ? {} : { tags }),
+      ...(parsed.confidence === undefined ? {} : { confidence: parsed.confidence }),
+      ...(parsed.project === undefined ? {} : { project: parsed.project }),
+      ...(parsed.workspace === undefined ? {} : { workspace: parsed.workspace }),
+      ...(parsed.source === undefined ? {} : { source: parsed.source }),
+      ...(parsed.relations === undefined ? {} : { relations: parsed.relations }),
+    };
+  });
 }
 
 function redactContent(content: string): string {
@@ -325,6 +360,45 @@ export function createMemoryMcpServer(runtime: MemoryMcpRuntime): McpServer {
       return success(
         { records, count: records.length },
         `Returned ${records.length} recent memor${records.length === 1 ? 'y' : 'ies'}.`,
+      );
+    },
+  );
+
+  server.registerTool(
+    'memory_auto_capture',
+    {
+      title: 'Automatically capture agent memory',
+      description:
+        'Persist concise agent-selected memory candidates after meaningful work. This never reads or stores a raw transcript.',
+      inputSchema: autoCaptureInputSchema,
+    },
+    async (arguments_) => {
+      if (runtime.processCapture === undefined) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: 'text',
+              text: 'Memory processing is unavailable in this runtime.',
+            },
+          ],
+        };
+      }
+      const project = projectRef(arguments_);
+      const workspace = captureWorkspace(arguments_);
+      const capture = redactedSessionCaptureSchema.parse({
+        content: redactContent(arguments_.content),
+        ...(arguments_.capturedAt === undefined ? {} : { capturedAt: arguments_.capturedAt }),
+        ...(arguments_.sessionId === undefined ? {} : { sessionId: arguments_.sessionId }),
+        ...(arguments_.source === undefined ? {} : { source: arguments_.source }),
+        explicit: automaticCandidates(arguments_.memories),
+        ...(project === undefined ? {} : { project }),
+        ...(workspace === undefined ? {} : { workspace }),
+      }) as RedactedSessionCapture;
+      const result = await runtime.processCapture(capture, { allowAutomatic: true });
+      return success(
+        result,
+        `Auto-captured with ${result.provider} (${result.mode}): ${result.durable.length} durable, ${result.inbox.length} Inbox, ${result.duplicates.length} duplicates.`,
       );
     },
   );
