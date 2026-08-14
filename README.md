@@ -19,6 +19,7 @@ The important boundary is simple: Markdown is the source of truth. SQLite can be
 - Local loopback Hono API and React/Vite workbench.
 - Stdio MCP tools: context, search, recent memories, automatic agent capture, durable writes, resolve, checkpoint, explicit processing, and Inbox review.
 - Codex adapter for MCP registration, managed `AGENTS.md`, and `SessionStart`, `PostCompact`, and `SessionEnd` hooks.
+- Automatic project bootstrap: the first Codex session creates and reuses a stable project identity without a per-project setup command.
 - Optional processors (`agent-native`, Ollama, OpenRouter, and OpenAI-compatible HTTP providers) with conservative mode as the default.
 - Secret scanning and redaction before content becomes durable.
 
@@ -58,6 +59,12 @@ Use `--scope project` to keep the integration inside one repository. If the
 Codex executable is not on `PATH`, pass its path with
 `--codex-executable /path/to/codex`.
 
+After this one-time installation, open Codex in any repository. RepoRecall finds
+the Git root, creates `.reporecall/project.md` and the local project scope when
+needed, and reuses that project identity on later sessions. `reporecall init`
+remains useful for explicit setup, a custom brain path, or managed `AGENTS.md`;
+it is not required for every new repository.
+
 ## File-first storage
 
 The canonical layout is intentionally inspectable:
@@ -71,6 +78,7 @@ The canonical layout is intentionally inspectable:
 
 your-project/
   .reporecall/
+    project.md                  # stable project metadata; safe to commit
     memories/mem_<uuid>.md
     inbox/inbox_<uuid>.md
     sessions/<id>.md
@@ -78,6 +86,11 @@ your-project/
 ```
 
 Project memory belongs in the project checkout and can be committed. The global brain is user-level and should normally remain on a private filesystem or private remote. Agent-native captures are concise and redacted; no raw transcript is saved, and a durable session summary is created only by an explicit checkpoint.
+
+The project manifest is not a memory and is not indexed as one. For Git-backed
+projects its ID is derived from a normalized remote fingerprint; for local-only
+folders it is a UUID persisted in `project.md`. The manifest never stores the
+raw remote, absolute machine path, credentials, or transcript.
 
 ## Scopes and context
 
@@ -155,20 +168,21 @@ The graph is a projection of indexed relations. It is not another storage system
 
 ## Git and cross-device workflow
 
-1. Machine A runs `remember` or saves a memory in the workbench.
-2. Commit the relevant project `.reporecall/memories/*.md` files.
-3. Machine B pulls or clones the repository.
-4. Machine B runs `reporecall rebuild` to create a local SQLite index.
-5. The same context builder retrieves the shared Markdown memory without copying SQLite or machine-specific paths.
+1. Machine A opens the repository in Codex; the first session creates `.reporecall/project.md` automatically.
+2. Machine A runs `remember` or saves a memory in the workbench.
+3. Commit `project.md` and the relevant project `.reporecall/memories/*.md` files.
+4. Machine B pulls or clones the repository.
+5. Machine B runs `reporecall rebuild` to create a local SQLite index, or starts Codex and lets the hook rebuild it.
+6. The same context builder retrieves the shared Markdown memory without copying SQLite or machine-specific paths.
 
 Keep private global memories out of public repositories. Use private remotes when project memory contains sensitive context.
 
 For a personal multi-device setup, keep these repositories separate:
 
-| Repository | Visibility | Contents |
-| ---------- | ---------- | -------- |
-| `triplesixmir/reporecall` | public | source, tests, CI, bilingual documentation |
-| `YOUR_GITHUB_USER/reporecall-private-memory` | private | your Markdown brain and safe RepoRecall config |
+| Repository                                   | Visibility | Contents                                       |
+| -------------------------------------------- | ---------- | ---------------------------------------------- |
+| `triplesixmir/reporecall`                    | public     | source, tests, CI, bilingual documentation     |
+| `YOUR_GITHUB_USER/reporecall-private-memory` | private    | your Markdown brain and safe RepoRecall config |
 
 On a fresh Windows machine, clone the private brain first and then initialize
 the project that should use it:
@@ -178,11 +192,13 @@ $Brain = Join-Path $env:USERPROFILE ".reporecall\brain"
 git clone git@github.com:YOUR_GITHUB_USER/reporecall-private-memory.git $Brain
 reporecall brain init --brain $Brain
 cd C:\path\to\your-project
-reporecall init --yes --brain $Brain
-reporecall rebuild --brain $Brain
 reporecall codex install --scope user
 reporecall doctor
 ```
+
+Start Codex in the project afterward. It creates the project scope
+automatically. `reporecall init --yes --brain $Brain` is still available when
+you want to create the managed `AGENTS.md` block before the first session.
 
 The public source checkout is installed separately with Node.js and pnpm. Pull
 the private brain before using a second machine, and push only after reviewing

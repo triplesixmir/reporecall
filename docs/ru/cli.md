@@ -2,26 +2,33 @@
 
 ## Команды
 
-| Команда      | Назначение                                                     |
-| ------------ | -------------------------------------------------------------- |
-| `init`       | Создать project memory directories, config и managed guidance. |
-| `brain init` | Создать global brain в resolved или custom path.               |
-| `status`     | Проверить canonical files и index errors.                      |
-| `doctor`     | Проверить Node.js version, storage и index health.             |
-| `remember`   | Записать explicit durable memory после redaction.              |
-| `process`    | Обработать явно переданную redacted capture.                   |
-| `search`     | Искать в SQLite index.                                         |
-| `inbox`      | Показать pending processor suggestions.                        |
-| `rebuild`    | Пересоздать disposable index из Markdown.                      |
-| `config`     | Показать resolved TOML configuration как JSON.                 |
-| `checkpoint` | Сохранить явный session event.                                 |
-| `serve`      | Запустить API, compiled UI, watcher и local index.             |
-| `mcp`        | Запустить stdio MCP server.                                    |
-| `codex install`   | Установить Codex MCP и managed lifecycle hooks.            |
-| `codex uninstall` | Удалить только настройки RepoRecall в Codex.               |
-| `codex-hook` | Обработать `SessionStart`, `PostCompact` или `SessionEnd`.     |
+| Команда           | Назначение                                                     |
+| ----------------- | -------------------------------------------------------------- |
+| `init`            | Создать project memory directories, config и managed guidance. |
+| `brain init`      | Создать global brain в resolved или custom path.               |
+| `status`          | Проверить canonical files и index errors.                      |
+| `doctor`          | Проверить Node.js version, storage и index health.             |
+| `remember`        | Записать explicit durable memory после redaction.              |
+| `process`         | Обработать явно переданную redacted capture.                   |
+| `search`          | Искать в SQLite index.                                         |
+| `inbox`           | Показать pending processor suggestions.                        |
+| `rebuild`         | Пересоздать disposable index из Markdown.                      |
+| `config`          | Показать resolved TOML configuration как JSON.                 |
+| `checkpoint`      | Сохранить явный session event.                                 |
+| `serve`           | Запустить API, compiled UI, watcher и local index.             |
+| `mcp`             | Запустить stdio MCP server.                                    |
+| `codex install`   | Установить Codex MCP и managed lifecycle hooks.                |
+| `codex uninstall` | Удалить только настройки RepoRecall в Codex.                   |
+| `codex-hook`      | Обработать `SessionStart`, `PostCompact` или `SessionEnd`.     |
 
 В checkout используйте `pnpm exec tsx packages/cli/src/bin.ts`. После build — `node packages/cli/dist/bin.js`.
+
+Project bootstrap автоматически выполняется для `remember`, `process`,
+`search`, `rebuild`, `status`, `inbox`, `checkpoint`, `serve` и `mcp`. Resolver
+находит Git root и обеспечивает `<root>/.reporecall/project.md`, `config.toml`,
+`memories/`, `inbox/` и `sessions/`. `init` остаётся явной idempotent-командой
+для custom brain и managed `AGENTS.md`; перед открытием нового репозитория в
+Codex она не нужна.
 
 ## Явный processor workflow
 
@@ -81,4 +88,4 @@ Codex не находится в `PATH`, передайте `--codex-executable 
 
 ## API development
 
-`createApiApp(runtime)` возвращает Hono app без TCP bind, поэтому routes тестируются через `app.request()`. `startServe(config)` добавляет rebuild, static assets, watcher и loopback HTTP lifecycle.
+`createApiApp(runtime)` возвращает Hono app без TCP bind, поэтому routes тестируются через `app.request()`. `startServe(config, project)` добавляет rebuild, static assets, watcher и loopback HTTP lifecycle. Resolved project передаётся отдельно от config, поэтому custom memory directory не принимается за project root.

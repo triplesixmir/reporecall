@@ -19,6 +19,7 @@ RepoRecall — локальный, независимый от модели сл
 - Loopback Hono API и React/Vite workbench.
 - Stdio MCP tools для context, search, recent, automatic agent capture, durable writes, resolve, checkpoint, explicit processing и Inbox.
 - Codex adapter для MCP, managed `AGENTS.md` и hooks `SessionStart`, `PostCompact`, `SessionEnd`.
+- Automatic project bootstrap: первая Codex-сессия сама создаёт и переиспользует стабильный project identity без отдельной команды для каждого проекта.
 - Опциональные processors: `agent-native`, Ollama, OpenRouter и OpenAI-compatible HTTP providers.
 - Secret scanner и redaction до записи в durable storage.
 
@@ -58,6 +59,12 @@ reporecall doctor
 Codex не находится в `PATH`, укажите его через
 `--codex-executable /path/to/codex`.
 
+После этой одноразовой установки откройте Codex в любом репозитории. RepoRecall
+найдёт Git root, при необходимости создаст `.reporecall/project.md` и project
+scope, а при следующих сессиях переиспользует тот же project identity.
+`reporecall init` остаётся полезной для явной настройки, custom brain path и
+managed `AGENTS.md`, но для каждого нового репозитория больше не обязательна.
+
 ## File-first storage
 
 Canonical layout остаётся inspectable и Git-friendly:
@@ -71,6 +78,7 @@ Canonical layout остаётся inspectable и Git-friendly:
 
 your-project/
   .reporecall/
+    project.md                  # stable project metadata; можно коммитить
     memories/mem_<uuid>.md
     inbox/inbox_<uuid>.md
     sessions/<id>.md
@@ -78,6 +86,11 @@ your-project/
 ```
 
 Project memory живёт рядом с checkout и может коммититься. Global brain обычно остаётся на private filesystem или private remote. Agent-native captures короткие и redacted: raw transcript не сохраняется, а durable session summary появляется только после явного checkpoint.
+
+Project manifest — не memory и не индексируется как memory. Для Git-проекта его
+ID получается из normalized remote fingerprint; для local-only folder это UUID,
+сохранённый в `project.md`. В manifest не записываются raw remote, absolute
+machine path, credentials или transcript.
 
 ## Scope и context
 
@@ -154,21 +167,22 @@ Graph — projection indexed relations, а не отдельное хранил�
 
 ## Git и cross-device workflow
 
-1. Machine A создаёт memory через `remember` или workbench.
-2. Commit-ит project `.reporecall/memories/*.md`.
-3. Machine B делает pull или clone.
-4. Machine B запускает `reporecall rebuild`.
-5. Тот же context builder получает memory из Markdown без копирования SQLite и machine-specific paths.
+1. Machine A открывает репозиторий в Codex; первая сессия автоматически создаёт `.reporecall/project.md`.
+2. Machine A создаёт memory через `remember` или workbench.
+3. Commit-ит `project.md` и project `.reporecall/memories/*.md`.
+4. Machine B делает pull или clone.
+5. Machine B запускает `reporecall rebuild` или открывает Codex, и hook пересобирает index.
+6. Тот же context builder получает memory из Markdown без копирования SQLite и machine-specific paths.
 
 Private global memories не должны попадать в public repositories. Для sensitive project memory используйте private remotes.
 
 Для личной работы на нескольких устройствах держите два репозитория
 раздельно:
 
-| Репозиторий | Visibility | Содержимое |
-| ----------- | ---------- | ---------- |
-| `triplesixmir/reporecall` | public | source, tests, CI, bilingual documentation |
-| `YOUR_GITHUB_USER/reporecall-private-memory` | private | ваш Markdown brain и safe RepoRecall config |
+| Репозиторий                                  | Visibility | Содержимое                                  |
+| -------------------------------------------- | ---------- | ------------------------------------------- |
+| `triplesixmir/reporecall`                    | public     | source, tests, CI, bilingual documentation  |
+| `YOUR_GITHUB_USER/reporecall-private-memory` | private    | ваш Markdown brain и safe RepoRecall config |
 
 На новом Windows-компьютере сначала клонируйте private brain, затем подключите
 его к проекту:
@@ -178,11 +192,13 @@ $Brain = Join-Path $env:USERPROFILE ".reporecall\brain"
 git clone git@github.com:YOUR_GITHUB_USER/reporecall-private-memory.git $Brain
 reporecall brain init --brain $Brain
 cd C:\path\to\your-project
-reporecall init --yes --brain $Brain
-reporecall rebuild --brain $Brain
 reporecall codex install --scope user
 reporecall doctor
 ```
+
+После этого запустите Codex в проекте: project scope создастся автоматически.
+`reporecall init --yes --brain $Brain` всё ещё доступна, если нужно заранее
+создать managed block в `AGENTS.md`.
 
 Public source checkout устанавливается отдельно через Node.js и pnpm. Перед
 работой на втором устройстве подтяните private brain, а перед push проверьте

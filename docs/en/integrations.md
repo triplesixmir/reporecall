@@ -45,6 +45,13 @@ To remove the integration, run `reporecall codex uninstall --scope user` (or
 
 The hook executable is fail-open. If the index or context builder is unavailable, the session continues and the hook reports a diagnostic instead of blocking the agent.
 
+After the one-time installation, project setup is automatic. On `SessionStart`
+or `PostCompact`, RepoRecall finds the Git root, creates the project manifest
+and canonical scope directories if needed, rebuilds the disposable index, and
+injects context using the stable project ID. A Git remote keeps the ID stable
+across clones; local-only projects persist a UUID in `project.md`. No raw
+remote, machine path, or transcript is written to that manifest.
+
 `SessionStart` and `PostCompact` are the automatic recall path. The agent-native
 capture path does not parse or persist the Codex transcript, so it remains
 model-actionable without depending on an unstable transcript format.

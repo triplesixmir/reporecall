@@ -29,6 +29,7 @@ npx --no-install reporecall init --yes
 - Запустите `doctor` и проверьте `status` на malformed files/index errors.
 - Тестируйте MCP с disposable `CODEX_HOME`, никогда не используя настоящий user directory.
 - Симулируйте два clone: commit только project Markdown, clone во вторую directory, rebuild и найдите ту же memory.
+- Проверьте, что свежий Codex `SessionStart` создаёт `.reporecall/project.md` без per-project `init`, а повторный запуск сохраняет тот же ID.
 - Проверьте, что context builder во втором clone получает ту же запись после rebuild локального SQLite index.
 
 ## Checklist public history
@@ -40,4 +41,5 @@ npx --no-install reporecall init --yes
 - нет generated SQLite, runtime markers, browser artifacts и build output;
 - `pnpm audit:public -- --working-tree` не находит sensitive paths или values;
 - English и Russian docs описывают реализованное и limitations;
+- внутренние execution notes в `docs/superpowers/` игнорируются и отсутствуют в public tree;
 - CI выполняет install, lint, typecheck, unit tests, E2E и build на Ubuntu, macOS и Windows.

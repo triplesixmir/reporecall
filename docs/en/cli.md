@@ -2,26 +2,33 @@
 
 ## Commands
 
-| Command      | Purpose                                                          |
-| ------------ | ---------------------------------------------------------------- |
-| `init`       | Create project memory directories, config, and managed guidance. |
-| `brain init` | Create a global brain at the resolved or custom path.            |
-| `status`     | Validate canonical files and report index errors.                |
-| `doctor`     | Check Node.js version and storage/index health.                  |
-| `remember`   | Write an explicit durable memory after redaction.                |
-| `process`    | Process an explicitly supplied redacted capture.                |
-| `search`     | Search the SQLite index.                                         |
-| `inbox`      | Print pending processor suggestions.                             |
-| `rebuild`    | Recreate the disposable index from Markdown.                     |
-| `config`     | Print resolved TOML configuration as JSON.                       |
-| `checkpoint` | Persist an explicit session event.                               |
-| `serve`      | Start API, compiled UI, watcher, and local index.                |
-| `mcp`        | Run the stdio MCP server.                                        |
-| `codex install`   | Install the Codex MCP server and managed lifecycle hooks.   |
-| `codex uninstall` | Remove only RepoRecall-managed Codex settings.             |
-| `codex-hook` | Handle a `SessionStart`, `PostCompact`, or `SessionEnd` event.   |
+| Command           | Purpose                                                          |
+| ----------------- | ---------------------------------------------------------------- |
+| `init`            | Create project memory directories, config, and managed guidance. |
+| `brain init`      | Create a global brain at the resolved or custom path.            |
+| `status`          | Validate canonical files and report index errors.                |
+| `doctor`          | Check Node.js version and storage/index health.                  |
+| `remember`        | Write an explicit durable memory after redaction.                |
+| `process`         | Process an explicitly supplied redacted capture.                 |
+| `search`          | Search the SQLite index.                                         |
+| `inbox`           | Print pending processor suggestions.                             |
+| `rebuild`         | Recreate the disposable index from Markdown.                     |
+| `config`          | Print resolved TOML configuration as JSON.                       |
+| `checkpoint`      | Persist an explicit session event.                               |
+| `serve`           | Start API, compiled UI, watcher, and local index.                |
+| `mcp`             | Run the stdio MCP server.                                        |
+| `codex install`   | Install the Codex MCP server and managed lifecycle hooks.        |
+| `codex uninstall` | Remove only RepoRecall-managed Codex settings.                   |
+| `codex-hook`      | Handle a `SessionStart`, `PostCompact`, or `SessionEnd` event.   |
 
 The source checkout can run commands with `pnpm exec tsx packages/cli/src/bin.ts`. A built checkout can use `node packages/cli/dist/bin.js`.
+
+Project bootstrap is automatic for `remember`, `process`, `search`, `rebuild`,
+`status`, `inbox`, `checkpoint`, `serve`, and `mcp`. The resolver finds the Git
+root and ensures `<root>/.reporecall/project.md`, `config.toml`, `memories/`,
+`inbox/`, and `sessions/`. `init` remains the explicit/idempotent command for
+custom brain setup and managed `AGENTS.md`; it is not required before opening a
+new repository in Codex.
 
 ## Explicit processor workflow
 
@@ -82,4 +89,4 @@ Use `reporecall codex install --scope user` for the normal Codex setup. Pass
 
 ## API development
 
-`createApiApp(runtime)` exposes the Hono app without opening a TCP socket, which makes route contracts testable with `app.request()`. `startServe(config)` adds rebuild, optional static assets, watcher, and loopback HTTP lifecycle.
+`createApiApp(runtime)` exposes the Hono app without opening a TCP socket, which makes route contracts testable with `app.request()`. `startServe(config, project)` adds rebuild, optional static assets, watcher, and loopback HTTP lifecycle. The resolved project is passed separately from the config so a custom memory directory cannot be mistaken for the project root.

@@ -44,6 +44,13 @@ reporecall codex install --scope project
 
 Hook fail-open. Если index или context builder недоступен, session продолжается, а hook пишет diagnostic, не блокируя agent.
 
+После одноразовой установки project setup происходит автоматически. На
+`SessionStart` или `PostCompact` RepoRecall находит Git root, при необходимости
+создаёт project manifest и canonical scope directories, пересобирает disposable
+index и inject-ит context со stable project ID. Git remote сохраняет один ID для
+разных clone; local-only project сохраняет UUID в `project.md`. Raw remote,
+machine path и transcript в manifest не записываются.
+
 `SessionStart` и `PostCompact` — automatic recall path. Agent-native capture не
 разбирает и не сохраняет Codex transcript, поэтому не зависит от нестабильного
 формата transcript.

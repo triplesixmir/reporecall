@@ -55,6 +55,23 @@ Write выполняется через temporary file и rename. Scope update �
 
 Project canonical Markdown намеренно можно track в Git. Generated SQLite, cache и runtime markers игнорируются; private project memories всё равно нужно проверять и отправлять в private remote.
 
+## Automatic project bootstrap
+
+Перед project-aware работой CLI находит Git top-level directory. Если
+`<project-root>/.reporecall/project.md` отсутствует, он атомарно создаётся на
+`SessionStart`, `PostCompact`, `mcp`, `serve` и project-aware CLI commands.
+Manifest отделён от memory files и не индексируется как memory.
+
+Для репозитория с remote project ID имеет вид `proj_git_<sha256>` и получается
+из normalized host/path fingerprint. SSH и HTTPS формы одного remote дают один
+ID. Без remote RepoRecall один раз создаёт `proj_local_<uuid>` и сохраняет его
+в manifest. Raw remote, absolute root, credentials и transcripts туда не
+попадают. Старые basename-based memory IDs остаются discoverable через runtime
+aliases, поэтому старые Markdown не нужно переписывать.
+
+`SessionEnd` не bootstrap-ит новый project: lifecycle marker пишется только если
+manifest уже существует. Остальные hook failures работают fail-open.
+
 ## Жизненный цикл индекса
 
 `SqliteMemoryIndex.rebuild()` перечисляет настроенные canonical roots, очищает derived tables, парсит Markdown и заново создаёт FTS5, metadata, tags, relations, file hashes и error rows. `update(paths)` обрабатывает ручные edits, atomic rename events и deletions. Index errors видимы и не меняют source files.
