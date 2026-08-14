@@ -1,18 +1,16 @@
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
+import {
+  REPORECALL_BEGIN_MARKER,
+  REPORECALL_END_MARKER,
+  REPORECALL_MANAGED_BLOCK,
+} from '@reporecall/integrations';
 import { stringifyConfig } from './config.js';
 
-const BEGIN_MARKER = '<!-- BEGIN REPORECALL MANAGED BLOCK -->';
-const END_MARKER = '<!-- END REPORECALL MANAGED BLOCK -->';
-
-const MANAGED_BLOCK = `${BEGIN_MARKER}
-## RepoRecall memory
-
-Canonical memory files are Markdown with YAML frontmatter and are the durable source of truth. SQLite is only a rebuildable local index. Do not store secrets, credentials, private keys, or raw transcripts in memory files.
-
-Use RepoRecall MCP tools or the local CLI for memory operations. Durable session summaries are created only after an explicit checkpoint.
-${END_MARKER}`;
+const BEGIN_MARKER = REPORECALL_BEGIN_MARKER;
+const END_MARKER = REPORECALL_END_MARKER;
+const MANAGED_BLOCK = REPORECALL_MANAGED_BLOCK;
 
 export type InitializeOptions = {
   cwd?: string;
@@ -65,7 +63,10 @@ function mergeManagedBlock(existing: string): { content: string; added: boolean 
   }
   if (begin !== -1 && end !== -1) {
     const endExclusive = end + END_MARKER.length;
-    return { content: `${existing.slice(0, begin)}${MANAGED_BLOCK}${existing.slice(endExclusive)}`, added: false };
+    return {
+      content: `${existing.slice(0, begin)}${MANAGED_BLOCK}${existing.slice(endExclusive)}`,
+      added: false,
+    };
   }
   const separator = existing.length === 0 || existing.endsWith('\n') ? '' : '\n';
   return { content: `${existing}${separator}\n${MANAGED_BLOCK}\n`, added: true };
@@ -89,7 +90,10 @@ export async function initializeBrain(options: { brainPath: string }): Promise<I
   const configRoot = join(brainPath, '.reporecall');
   await mkdir(configRoot, { recursive: true });
   const configPath = join(configRoot, 'config.toml');
-  await writeIfMissing(configPath, stringifyConfig({ processor: 'disabled', processorMode: 'conservative' }));
+  await writeIfMissing(
+    configPath,
+    stringifyConfig({ processor: 'disabled', processorMode: 'conservative' }),
+  );
   return { brainPath, configPath, managedBlockAdded: false, createdDirectories };
 }
 

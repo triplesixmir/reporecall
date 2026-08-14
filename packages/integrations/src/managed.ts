@@ -10,7 +10,7 @@ export const REPORECALL_MANAGED_BLOCK = `${REPORECALL_BEGIN_MARKER}
 
 Canonical memory files are Markdown with YAML frontmatter and are the durable source of truth. SQLite is only a rebuildable local index. Do not store secrets, credentials, private keys, or raw transcripts in memory files.
 
-Use RepoRecall MCP tools or the local CLI for memory operations. Durable session summaries are created only after an explicit checkpoint.
+At the beginning of work, use the context injected by SessionStart or PostCompact; call memory_get_context for deeper query-specific recall. Before the final response of a meaningful task, automatically call memory_auto_capture once with a short redacted summary and structured memories for reusable facts, preferences, decisions, goals, todos, constraints, or insights. Skip trivial turns and do not ask the user to run a memory command. Use project scope for repository knowledge and global scope only for user-level knowledge. Never store raw transcripts or secrets. Durable session summaries are created only after an explicit checkpoint.
 ${REPORECALL_END_MARKER}`;
 
 const HOOK_EVENTS = ['SessionStart', 'PostCompact', 'SessionEnd'] as const;
@@ -94,7 +94,12 @@ export function managedHookCommand(event: HookEvent, executable = 'reporecall'):
 }
 
 function managedGroup(event: HookEvent, executable: string): HookGroup {
-  const matcher = event === 'SessionStart' ? 'startup|resume|clear|compact' : event === 'PostCompact' ? 'manual|auto' : 'other';
+  const matcher =
+    event === 'SessionStart'
+      ? 'startup|resume|clear|compact'
+      : event === 'PostCompact'
+        ? 'manual|auto'
+        : 'other';
   const command = managedHookCommand(event, executable);
   return {
     matcher,
@@ -103,7 +108,9 @@ function managedGroup(event: HookEvent, executable: string): HookGroup {
         type: 'command',
         command,
         timeout: event === 'SessionEnd' ? 3 : 10,
-        ...(event === 'SessionStart' || event === 'PostCompact' ? { additionalContextLimit: 5_000 } : {}),
+        ...(event === 'SessionStart' || event === 'PostCompact'
+          ? { additionalContextLimit: 5_000 }
+          : {}),
       },
     ],
   };
@@ -114,7 +121,11 @@ function isManagedHandler(value: unknown, event: HookEvent, executable: string):
   return value.type === 'command' && value.command === managedHookCommand(event, executable);
 }
 
-function withoutManagedHandlers(value: unknown, event: HookEvent, executable: string): HookGroup | null {
+function withoutManagedHandlers(
+  value: unknown,
+  event: HookEvent,
+  executable: string,
+): HookGroup | null {
   if (!isRecord(value) || !Array.isArray(value.hooks)) return isRecord(value) ? value : null;
   const original = value.hooks;
   const hooks = original.filter((handler) => !isManagedHandler(handler, event, executable));
@@ -123,7 +134,11 @@ function withoutManagedHandlers(value: unknown, event: HookEvent, executable: st
   return { ...value, hooks };
 }
 
-function updateHooksDocument(source: string | undefined, executable: string, install: boolean): string {
+function updateHooksDocument(
+  source: string | undefined,
+  executable: string,
+  install: boolean,
+): string {
   let document: JsonObject = {};
   if (source !== undefined && source.trim() !== '') {
     const parsed: unknown = JSON.parse(source);
@@ -156,7 +171,10 @@ function updateHooksDocument(source: string | undefined, executable: string, ins
   return `${JSON.stringify(document, null, 2)}\n`;
 }
 
-export async function updateManagedHooks(path: string, executable = 'reporecall'): Promise<ManagedFileUpdate> {
+export async function updateManagedHooks(
+  path: string,
+  executable = 'reporecall',
+): Promise<ManagedFileUpdate> {
   const source = await readOptional(path);
   const next = updateHooksDocument(source, executable, true);
   const changed = source !== next;
@@ -164,7 +182,10 @@ export async function updateManagedHooks(path: string, executable = 'reporecall'
   return { changed, path };
 }
 
-export async function removeManagedHooks(path: string, executable = 'reporecall'): Promise<ManagedFileUpdate> {
+export async function removeManagedHooks(
+  path: string,
+  executable = 'reporecall',
+): Promise<ManagedFileUpdate> {
   const source = await readOptional(path);
   if (source === undefined) return { changed: false, path };
   const next = updateHooksDocument(source, executable, false);

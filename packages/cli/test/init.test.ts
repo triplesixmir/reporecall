@@ -36,7 +36,11 @@ describe('initialization', () => {
     expect(agents).toContain('# Existing guidance');
     expect(agents).toContain('Keep this text.');
     expect(agents).toContain('Canonical memory files are Markdown');
-    await expect(readFile(join(project, '.reporecall', 'config.toml'), 'utf8')).resolves.toContain('brain_path');
+    expect(agents).toContain('memory_auto_capture');
+    expect(agents).toContain('meaningful task');
+    await expect(readFile(join(project, '.reporecall', 'config.toml'), 'utf8')).resolves.toContain(
+      'brain_path',
+    );
     await expect(readdir(join(brain, 'memories'))).resolves.toEqual([]);
   });
 
@@ -47,6 +51,8 @@ describe('initialization', () => {
     const report = await initializeBrain({ brainPath: brain });
 
     expect(report.brainPath).toBe(brain);
-    await expect(readFile(join(brain, '.reporecall', 'config.toml'), 'utf8')).resolves.toContain('processor');
+    await expect(readFile(join(brain, '.reporecall', 'config.toml'), 'utf8')).resolves.toContain(
+      'processor',
+    );
   });
 });
