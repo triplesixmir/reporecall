@@ -17,7 +17,7 @@ The important boundary is simple: Markdown is the source of truth. SQLite can be
 - Deterministic context selection with pinned/project-current boosts and token budgets.
 - Safe CLI commands for initialization, remembering, searching, Inbox review, checkpoints, rebuilds, diagnostics, and serving.
 - Local loopback Hono API and React/Vite workbench.
-- Stdio MCP tools: context, search, recent memories, durable writes, resolve, checkpoint, explicit processing, and Inbox review.
+- Stdio MCP tools: context, search, recent memories, automatic agent capture, durable writes, resolve, checkpoint, explicit processing, and Inbox review.
 - Codex adapter for MCP registration, managed `AGENTS.md`, and `SessionStart`, `PostCompact`, and `SessionEnd` hooks.
 - Optional processors (`agent-native`, Ollama, OpenRouter, and OpenAI-compatible HTTP providers) with conservative mode as the default.
 - Secret scanning and redaction before content becomes durable.
@@ -77,7 +77,7 @@ your-project/
     config.toml
 ```
 
-Project memory belongs in the project checkout and can be committed. The global brain is user-level and should normally remain on a private filesystem or private remote. Session captures are redacted and temporary; no raw transcript is saved, and a durable session summary is created only by an explicit checkpoint.
+Project memory belongs in the project checkout and can be committed. The global brain is user-level and should normally remain on a private filesystem or private remote. Agent-native captures are concise and redacted; no raw transcript is saved, and a durable session summary is created only by an explicit checkpoint.
 
 ## Scopes and context
 
@@ -119,13 +119,15 @@ Paths and behavior can be changed with CLI flags or TOML configuration. Preceden
 
 The MCP server is model-agnostic and returns both structured data and a short human-readable summary. MCP writes preserve user-owned tags and run the same redaction rules as the CLI.
 
-The Codex adapter installs the MCP command and managed blocks without overwriting user text or unrelated hooks. `reporecall codex install --scope user` is the supported entry point; `SessionStart` and `PostCompact` inject deterministic context. `SessionEnd` writes only a lifecycle marker. Hook failures are fail-open, and no unstable transcript format is required.
+The Codex adapter installs the MCP command and managed blocks without overwriting user text or unrelated hooks. `reporecall codex install --scope user` is the supported entry point. `SessionStart` and `PostCompact` inject deterministic context, while the managed instructions ask the agent to call `memory_auto_capture` after meaningful tasks; the user does not need to type a memory command. `SessionEnd` writes only a lifecycle marker. Hook failures are fail-open, and no unstable transcript format is required.
 
-This is automatic context retrieval, not silent memory creation. An agent can
-write a durable record explicitly with `memory_remember` or `reporecall
-remember`; a durable session summary requires an explicit checkpoint. The
-default processor is disabled for privacy. Enable a processor deliberately if
-you want suggestions in Inbox.
+`memory_auto_capture` receives a short redacted task summary and structured
+agent-selected candidates. Explicit candidates are written to canonical
+Markdown and indexed immediately; provider-generated suggestions still follow
+the configured processor mode and conservative mode routes them to Inbox. The
+default processor is disabled for privacy, but agent-selected candidates do not
+need an external provider. Use `memory_remember` or `reporecall remember` for
+direct explicit writes, and use `memory_checkpoint` for a durable session event.
 
 To process a capture explicitly, use `reporecall process --content "..."` or
 pipe a JSON capture to `reporecall process --json`. The command sends only

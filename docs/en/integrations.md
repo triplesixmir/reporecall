@@ -8,14 +8,22 @@ Run the local stdio server:
 reporecall mcp
 ```
 
-The server exposes `memory_get_context`, `memory_search`, `memory_get_recent`, `memory_remember`, `memory_update`, `memory_resolve`, `memory_checkpoint`, `memory_process`, and `memory_review_inbox`. Every response contains structured content and a concise summary.
+The server exposes `memory_get_context`, `memory_search`, `memory_get_recent`, `memory_auto_capture`, `memory_remember`, `memory_update`, `memory_resolve`, `memory_checkpoint`, `memory_process`, and `memory_review_inbox`. Every response contains structured content and a concise summary.
 
 MCP writes use the same canonical stores and secret redaction as the CLI. Agents can add AI tags, but user-owned tags are preserved. A durable session event requires the explicit `memory_checkpoint` tool.
 
-`memory_process` accepts an explicitly supplied redacted capture and returns
-durable records, Inbox suggestions, duplicates, warnings, provider, and mode.
-It does not read transcript files. `allowAutomatic` defaults to `false`; use it
-only when automatic persistence is deliberately approved for that call.
+`memory_auto_capture` is the normal Codex agent-native path. After meaningful
+work, the managed instructions ask the agent to send a concise redacted summary
+and a `memories` array of structured candidates. Explicit candidates become
+durable Markdown records and are indexed immediately; provider suggestions
+still follow the configured processor mode. Trivial turns should not call the
+tool.
+
+`memory_process` remains the lower-level processor workflow for an explicitly
+supplied redacted capture and returns durable records, Inbox suggestions,
+duplicates, warnings, provider, and mode. Neither tool reads or stores
+transcript files. A durable session event still requires the explicit
+`memory_checkpoint` tool.
 
 ## Codex
 
@@ -28,7 +36,7 @@ reporecall codex install --scope project
 ```
 
 - `codex mcp add` registers the local stdio server;
-- a managed `AGENTS.md` block explains source-of-truth and privacy semantics;
+- a managed `AGENTS.md` block explains source-of-truth, privacy, automatic capture, and recall semantics;
 - managed `hooks.json` entries inject context at `SessionStart` and `PostCompact` and write a lifecycle marker at `SessionEnd`;
 - unrelated user text and hook handlers remain intact.
 
@@ -36,6 +44,10 @@ To remove the integration, run `reporecall codex uninstall --scope user` (or
 `--scope project`). Only RepoRecall-managed entries are removed.
 
 The hook executable is fail-open. If the index or context builder is unavailable, the session continues and the hook reports a diagnostic instead of blocking the agent.
+
+`SessionStart` and `PostCompact` are the automatic recall path. The agent-native
+capture path does not parse or persist the Codex transcript, so it remains
+model-actionable without depending on an unstable transcript format.
 
 ## Processors
 

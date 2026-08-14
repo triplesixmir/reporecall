@@ -8,14 +8,21 @@
 reporecall mcp
 ```
 
-Доступны `memory_get_context`, `memory_search`, `memory_get_recent`, `memory_remember`, `memory_update`, `memory_resolve`, `memory_checkpoint`, `memory_process` и `memory_review_inbox`. Каждый ответ содержит structured content и короткое summary.
+Доступны `memory_get_context`, `memory_search`, `memory_get_recent`, `memory_auto_capture`, `memory_remember`, `memory_update`, `memory_resolve`, `memory_checkpoint`, `memory_process` и `memory_review_inbox`. Каждый ответ содержит structured content и короткое summary.
 
 MCP writes используют те же canonical stores и secret redaction, что CLI. Agent может добавить AI tags, но user-owned tags сохраняются. Durable session event требует явного `memory_checkpoint`.
 
-`memory_process` принимает только явно переданную redacted capture и возвращает
-durable records, Inbox suggestions, duplicates, warnings, provider и mode. Он не
-читает transcript files. `allowAutomatic` по умолчанию `false`; включайте его
-только для конкретного осознанно разрешённого вызова.
+`memory_auto_capture` — основной Codex agent-native path. После meaningful-задачи
+managed instructions просят agent передать короткий redacted summary и массив
+structured candidates в `memories`. Explicit candidates становятся durable
+Markdown records и сразу индексируются; provider suggestions продолжают
+следовать настроенному processor mode. Для trivial turns tool вызывать не нужно.
+
+`memory_process` остаётся lower-level processor workflow для явно переданной
+redacted capture и возвращает durable records, Inbox suggestions, duplicates,
+warnings, provider и mode. Ни один из этих tools не читает и не сохраняет
+transcript files. Durable session event по-прежнему требует явного
+`memory_checkpoint`.
 
 ## Codex
 
@@ -28,7 +35,7 @@ reporecall codex install --scope project
 ```
 
 - `codex mcp add` регистрирует local stdio server;
-- managed `AGENTS.md` block объясняет source-of-truth и privacy semantics;
+- managed `AGENTS.md` block объясняет source-of-truth, privacy, automatic capture и recall semantics;
 - managed `hooks.json` inject-ит context на `SessionStart` и `PostCompact`, lifecycle marker — на `SessionEnd`;
 - unrelated user text и hook handlers сохраняются.
 
@@ -36,6 +43,10 @@ reporecall codex install --scope project
 (или `--scope project`). Удаляются только managed entries RepoRecall.
 
 Hook fail-open. Если index или context builder недоступен, session продолжается, а hook пишет diagnostic, не блокируя agent.
+
+`SessionStart` и `PostCompact` — automatic recall path. Agent-native capture не
+разбирает и не сохраняет Codex transcript, поэтому не зависит от нестабильного
+формата transcript.
 
 ## Processors
 

@@ -7,6 +7,7 @@ RepoRecall is local-first, but local does not mean automatically safe. Treat eve
 - Durable memories are Markdown files with YAML frontmatter.
 - Inbox suggestions are local Markdown files until accepted or dismissed.
 - Explicit session checkpoints are Markdown session events.
+- Agent-native automatic captures are short redacted summaries plus structured candidates; durable candidates are stored as canonical Markdown.
 - Session captures used by processors are redacted and temporary; raw transcripts are not a durable source.
 - SQLite contains derived index data and can be deleted.
 - An explicit `reporecall process` or `memory_process` call may create Inbox suggestions or durable records, but the supplied capture is never persisted as a transcript.
@@ -30,10 +31,10 @@ Detected spans are replaced with `[REDACTED <kind>]` and a warning is returned. 
 5. Use ignored paths for repositories and folders that should not be watched.
 6. Treat processor output as a suggestion in `conservative` mode.
 7. Do not put raw transcripts or credentials into checkpoint content.
-8. Treat `memory_process` and `reporecall process` as explicit operations; Codex hooks only retrieve context and do not submit captures automatically.
+8. Treat `memory_process` and `reporecall process` as explicit lower-level processor operations; the managed Codex agent-native path uses `memory_auto_capture` for concise structured candidates and never submits a raw transcript.
 
 Project `memories/`, accepted Inbox records, and explicit session checkpoints are canonical Markdown and are not ignored automatically. Commit only the records that belong in the repository; use a private remote when they contain sensitive context.
 
 ## Hooks and transcripts
 
-Codex lifecycle hooks receive lifecycle input only. `SessionStart` and `PostCompact` build context from canonical files; `SessionEnd` writes a small event marker. RepoRecall does not depend on an unstable transcript path or silently summarize a conversation.
+Codex lifecycle hooks receive lifecycle input for recall and lifecycle markers. `SessionStart` and `PostCompact` build context from canonical files; `SessionEnd` writes a small event marker. Agent-native capture sends only a concise summary and structured candidates through MCP; RepoRecall does not depend on an unstable transcript path or silently summarize a conversation.

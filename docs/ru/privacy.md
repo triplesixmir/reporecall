@@ -7,6 +7,7 @@ RepoRecall local-first, но local не означает автоматичес�
 - Durable memories — Markdown files с YAML frontmatter.
 - Inbox suggestions — local Markdown до accept или dismiss.
 - Explicit session checkpoints — Markdown session events.
+- Agent-native automatic captures — короткие redacted summaries и structured candidates; durable candidates хранятся как canonical Markdown.
 - Session captures для processors redacted и временные; raw transcript не является durable source.
 - SQLite содержит derived index и может быть удалён.
 - Явный вызов `reporecall process` или `memory_process` может создать Inbox suggestions или durable records, но переданная capture не сохраняется как transcript.
@@ -30,10 +31,10 @@ RepoRecall local-first, но local не означает автоматичес�
 5. Настраивайте ignored paths для директорий, которые нельзя watch/import.
 6. Оставляйте processor output в Inbox в `conservative` mode.
 7. Не помещайте raw transcripts и credentials в checkpoint content.
-8. Считайте `memory_process` и `reporecall process` явными операциями; Codex hooks только получают context и не отправляют captures автоматически.
+8. Считайте `memory_process` и `reporecall process` явными lower-level processor operations; managed Codex agent-native path использует `memory_auto_capture` для коротких structured candidates и никогда не отправляет raw transcript.
 
 Project `memories/`, accepted Inbox records и explicit session checkpoints — canonical Markdown и автоматически не игнорируются. Commit-ьте только records, предназначенные для repository; для sensitive context используйте private remote.
 
 ## Hooks и transcripts
 
-Codex lifecycle hooks получают только lifecycle input. `SessionStart` и `PostCompact` строят context из canonical files, `SessionEnd` пишет небольшой event marker. RepoRecall не зависит от нестабильного transcript path и не делает silent summary.
+Codex lifecycle hooks получают lifecycle input для recall и lifecycle markers. `SessionStart` и `PostCompact` строят context из canonical files, `SessionEnd` пишет небольшой event marker. Agent-native capture передаёт только короткий summary и structured candidates через MCP; RepoRecall не зависит от нестабильного transcript path и не делает silent summary.

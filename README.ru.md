@@ -17,7 +17,7 @@ RepoRecall — локальный, независимый от модели сл
 - Детерминированная сборка контекста с приоритетом pinned/project-current и token budget.
 - Безопасные CLI-команды для init, remember, search, Inbox, checkpoint, rebuild, doctor и serve.
 - Loopback Hono API и React/Vite workbench.
-- Stdio MCP tools для context, search, recent, durable writes, resolve, checkpoint, explicit processing и Inbox.
+- Stdio MCP tools для context, search, recent, automatic agent capture, durable writes, resolve, checkpoint, explicit processing и Inbox.
 - Codex adapter для MCP, managed `AGENTS.md` и hooks `SessionStart`, `PostCompact`, `SessionEnd`.
 - Опциональные processors: `agent-native`, Ollama, OpenRouter и OpenAI-compatible HTTP providers.
 - Secret scanner и redaction до записи в durable storage.
@@ -77,7 +77,7 @@ your-project/
     config.toml
 ```
 
-Project memory живёт рядом с checkout и может коммититься. Global brain обычно остаётся на private filesystem или private remote. Session captures redacted и временные: raw transcript не сохраняется, а durable summary появляется только после явного checkpoint.
+Project memory живёт рядом с checkout и может коммититься. Global brain обычно остаётся на private filesystem или private remote. Agent-native captures короткие и redacted: raw transcript не сохраняется, а durable session summary появляется только после явного checkpoint.
 
 ## Scope и context
 
@@ -119,13 +119,15 @@ reporecall codex-hook <event>   обработать Codex lifecycle hook
 
 MCP server model-agnostic и возвращает structured data вместе с коротким human-readable summary. MCP writes сохраняют user-owned tags и используют те же redaction rules, что CLI.
 
-Codex adapter устанавливает MCP command и managed blocks, не перезаписывая пользовательский текст и unrelated hooks. Поддерживаемая точка входа — `reporecall codex install --scope user`; `SessionStart` и `PostCompact` инжектируют детерминированный context. `SessionEnd` пишет только lifecycle marker. При ошибке hook работает fail-open и не зависит от нестабильного transcript format.
+Codex adapter устанавливает MCP command и managed blocks, не перезаписывая пользовательский текст и unrelated hooks. Поддерживаемая точка входа — `reporecall codex install --scope user`. `SessionStart` и `PostCompact` инжектируют детерминированный context, а managed instructions просят agent после meaningful-задач вызвать `memory_auto_capture`; пользователю не нужно вручную вводить memory command. `SessionEnd` пишет только lifecycle marker. При ошибке hook работает fail-open и не зависит от нестабильного transcript format.
 
-Это automatic retrieval контекста, а не тихое создание памяти. Agent явно пишет
-durable record через `memory_remember` или `reporecall remember`; durable summary
-сессии появляется только после явного checkpoint. По умолчанию processor отключён
-ради privacy. Если нужны suggestions, processor включается отдельно и пишет их
-в Inbox.
+`memory_auto_capture` получает короткий redacted summary задачи и structured
+candidates, выбранные agent-ом. Explicit candidates сразу записываются в
+canonical Markdown и индексируются; provider-generated suggestions продолжают
+следовать processor mode, а в `conservative` попадают в Inbox. По умолчанию
+processor отключён ради privacy, но для agent-selected candidates внешний
+provider не нужен. Для прямой записи используйте `memory_remember` или
+`reporecall remember`, а для durable session event — `memory_checkpoint`.
 
 Явную capture можно обработать через `reporecall process --content "..."` или
 передать JSON в stdin с флагом `--json`. Provider получает только redacted
