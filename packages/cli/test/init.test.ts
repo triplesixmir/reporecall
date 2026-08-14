@@ -32,6 +32,10 @@ describe('initialization', () => {
 
     expect(first.managedBlockAdded).toBe(true);
     expect(second.managedBlockAdded).toBe(false);
+    expect(first.projectId).toMatch(/^proj_local_/u);
+    expect(second.projectId).toBe(first.projectId);
+    expect(second.manifestPath).toBe(first.manifestPath);
+    await expect(readFile(first.manifestPath ?? '', 'utf8')).resolves.toContain('kind: project');
     expect(beginCount).toBe(1);
     expect(agents).toContain('# Existing guidance');
     expect(agents).toContain('Keep this text.');

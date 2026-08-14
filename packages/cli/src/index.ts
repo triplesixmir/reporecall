@@ -27,6 +27,7 @@ import {
   type RepoRecallConfig,
 } from './config.js';
 import { redactSecrets } from './privacy.js';
+import { discoverProject, ensureProject, type ResolvedProject } from './project.js';
 import { startServe } from './server.js';
 
 export type CliIO = {
@@ -128,17 +129,47 @@ async function getConfig(
   });
 }
 
+type ProjectContextMode = 'ensure' | 'read-only';
+
+async function getProjectContext(
+  context: CommandContext,
+  flags: ParsedArgs['flags'],
+  mode: ProjectContextMode = 'ensure',
+): Promise<{ config: RepoRecallConfig; project: ResolvedProject }> {
+  const discovered = await discoverProject(context.cwd);
+  const rootContext: CommandContext = { ...context, cwd: discovered.root };
+  const initialConfig = await getConfig(rootContext, flags);
+  let project = mode === 'ensure'
+    ? await ensureProject(discovered.root, initialConfig.projectMemoryDir)
+    : await discoverProject(discovered.root);
+  let config = await getConfig(rootContext, flags);
+
+  if (mode === 'ensure' && resolve(config.projectMemoryDir) !== project.memoryDir) {
+    project = await ensureProject(discovered.root, config.projectMemoryDir);
+    config = await getConfig(rootContext, flags);
+  }
+
+  return {
+    config,
+    project: { ...project, memoryDir: config.projectMemoryDir },
+  };
+}
+
 function projectRef(cwd: string) {
   const name = basename(cwd) || 'project';
   return { id: name.toLocaleLowerCase().replace(/[^a-z0-9_-]+/gu, '-'), root: cwd, name };
 }
 
-function rootsFor(config: RepoRecallConfig) {
-  const project = projectRef(config.projectMemoryDir);
+function projectReference(project: ResolvedProject): ProjectRef {
+  return { id: project.id, root: project.root, name: project.name };
+}
+
+function rootsFor(config: RepoRecallConfig, project: ResolvedProject) {
+  const projectRef = { id: project.id, root: project.root, name: project.name };
   return [
     { root: config.brainPath, scope: 'global' as const },
-    { root: config.projectMemoryDir, scope: 'project' as const, project },
-    { root: config.projectMemoryDir, scope: 'session' as const, project },
+    { root: config.projectMemoryDir, scope: 'project' as const, project: projectRef },
+    { root: config.projectMemoryDir, scope: 'session' as const, project: projectRef },
   ];
 }
 
@@ -162,9 +193,10 @@ async function inboxItems(config: RepoRecallConfig, limit: number): Promise<Inbo
     .slice(0, limit);
 }
 
-export function createMcpRuntime(config: RepoRecallConfig): {
+export function createMcpRuntime(config: RepoRecallConfig, project: ResolvedProject): {
   runtime: MemoryMcpRuntime;
   index: SqliteMemoryIndex;
+  project: ResolvedProject;
   close: () => void;
 } {
   const processing = createProcessingRuntime(config);
@@ -176,6 +208,8 @@ export function createMcpRuntime(config: RepoRecallConfig): {
     stores: { global: globalStore, project: projectStore, session: sessionStore },
     index,
     contextBuilder,
+    project: { id: project.id, root: project.root, name: project.name },
+    projectAliases: project.legacyIds,
     afterWrite: async (record) => {
       const root = record.scope === 'global' ? config.brainPath : config.projectMemoryDir;
       await index.update([memoryPath(root, record.id, record.scope)]);
@@ -183,7 +217,7 @@ export function createMcpRuntime(config: RepoRecallConfig): {
     listInbox: (limit) => processing.inbox.list({ status: 'pending', limit }),
     processCapture: (capture, options) => processing.processCapture(capture, options),
   };
-  return { runtime, index, close: () => processing.close() };
+  return { runtime, index, project, close: () => processing.close() };
 }
 
 function storeFor(
@@ -216,8 +250,12 @@ async function readStdin(stream: AsyncIterable<string | Uint8Array>): Promise<st
   return chunks.join('');
 }
 
-function projectFromFlags(cwd: string, flags: ParsedArgs['flags']): ProjectRef {
-  const defaultProject = projectRef(cwd);
+function projectFromFlags(
+  cwd: string,
+  flags: ParsedArgs['flags'],
+  resolvedProject?: ResolvedProject,
+): ProjectRef {
+  const defaultProject = resolvedProject === undefined ? projectRef(cwd) : projectReference(resolvedProject);
   const root = stringFlag(flags, 'project-root') ?? defaultProject.root;
   const resolvedRoot = resolve(root);
   return {
@@ -238,13 +276,14 @@ function captureWithFlags(
   context: CommandContext,
   flags: ParsedArgs['flags'],
   capture: RedactedSessionCapture,
+  resolvedProject?: ResolvedProject,
 ): RedactedSessionCapture {
   const hasProjectOverride = ['project-id', 'project-root', 'project-name'].some(
     (name) => stringFlag(flags, name) !== undefined,
   );
   const project = hasProjectOverride
-    ? projectFromFlags(context.cwd, flags)
-    : (capture.project ?? projectFromFlags(context.cwd, flags));
+    ? projectFromFlags(context.cwd, flags, resolvedProject)
+    : (capture.project ?? projectFromFlags(context.cwd, flags, resolvedProject));
   const workspace = workspaceFromFlags(flags) ?? capture.workspace;
   const sessionId = stringFlag(flags, 'session-id') ?? capture.sessionId;
   const capturedAt = stringFlag(flags, 'captured-at') ?? capture.capturedAt;
@@ -260,11 +299,12 @@ function captureWithFlags(
 async function processCaptureInput(
   context: CommandContext,
   flags: ParsedArgs['flags'],
+  resolvedProject?: ResolvedProject,
 ): Promise<RedactedSessionCapture> {
   const content = stringFlag(flags, 'content');
   if (content !== undefined) {
     return redactedSessionCaptureSchema.parse(
-      captureWithFlags(context, flags, { content }),
+      captureWithFlags(context, flags, { content }, resolvedProject),
     ) as RedactedSessionCapture;
   }
 
@@ -278,7 +318,7 @@ async function processCaptureInput(
   }
   const capture = redactedSessionCaptureSchema.parse(parsed) as RedactedSessionCapture;
   return redactedSessionCaptureSchema.parse(
-    captureWithFlags(context, flags, capture),
+    captureWithFlags(context, flags, capture, resolvedProject),
   ) as RedactedSessionCapture;
 }
 
@@ -286,8 +326,8 @@ async function processCommand(
   context: CommandContext,
   flags: ParsedArgs['flags'],
 ): Promise<number> {
-  const config = await getConfig(context, flags);
-  const capture = await processCaptureInput(context, flags);
+  const { config, project } = await getProjectContext(context, flags);
+  const capture = await processCaptureInput(context, flags, project);
   const scanned = redactSecrets(capture.content);
   if (scanned.blocked || scanned.redacted.trim() === '') {
     context.stderr('Refusing to process a capture containing only a secret or credential.\n');
@@ -323,6 +363,7 @@ async function processCommand(
 async function rememberCommand(
   context: CommandContext,
   config: RepoRecallConfig,
+  project: ResolvedProject,
   flags: ParsedArgs['flags'],
   contentInput: string,
   forced?: { scope: MemoryScope; type: MemoryType },
@@ -356,7 +397,7 @@ async function rememberCommand(
     status,
     pinned: booleanFlag(flags, 'pin'),
     tags,
-    ...(scope === 'global' ? {} : { project: projectRef(context.cwd) }),
+    ...(scope === 'global' ? {} : { project: projectReference(project) }),
     source: { kind: 'user', method: forced === undefined ? 'cli' : 'checkpoint' },
   });
   const index = new SqliteMemoryIndex({ path: config.indexPath });
@@ -367,7 +408,9 @@ async function rememberCommand(
 }
 
 async function initCommand(context: CommandContext, flags: ParsedArgs['flags']): Promise<number> {
-  const config = await getConfig(context, flags);
+  const discovered = await discoverProject(context.cwd);
+  const projectContext: CommandContext = { ...context, cwd: discovered.root };
+  const config = await getConfig(projectContext, flags);
   const brainFlag = stringFlag(flags, 'brain');
   let brainPath = config.brainPath;
   let brainConfigPath = brainFlag === undefined ? undefined : config.brainPath;
@@ -388,7 +431,7 @@ async function initCommand(context: CommandContext, flags: ParsedArgs['flags']):
     brainConfigPath = '~/.reporecall/brain';
   }
   const report = await initializeProject({
-    cwd: context.cwd,
+    cwd: discovered.root,
     brainPath,
     ...(brainConfigPath === undefined ? {} : { brainConfigPath }),
     projectMemoryDir: config.projectMemoryDir,
@@ -401,9 +444,9 @@ async function rebuildCommand(
   context: CommandContext,
   flags: ParsedArgs['flags'],
 ): Promise<number> {
-  const config = await getConfig(context, flags);
+  const { config, project } = await getProjectContext(context, flags);
   const index = new SqliteMemoryIndex({ path: config.indexPath });
-  const report = await index.rebuild(rootsFor(config));
+  const report = await index.rebuild(rootsFor(config, project));
   index.close();
   printJson(context, report);
   return report.invalid.length === 0 ? 0 : 1;
@@ -414,7 +457,7 @@ async function searchCommand(
   flags: ParsedArgs['flags'],
   query: string,
 ): Promise<number> {
-  const config = await getConfig(context, flags);
+  const { config } = await getProjectContext(context, flags);
   const index = new SqliteMemoryIndex({ path: config.indexPath });
   const results = await index.search({ query });
   index.close();
@@ -425,7 +468,7 @@ async function searchCommand(
 }
 
 async function statusCommand(context: CommandContext, flags: ParsedArgs['flags']): Promise<number> {
-  const config = await getConfig(context, flags);
+  const { config } = await getProjectContext(context, flags);
   const project = new FileMemoryStore({ root: config.projectMemoryDir, scope: 'project' });
   const brain = new FileMemoryStore({ root: config.brainPath, scope: 'global' });
   const [projectValidation, brainValidation] = await Promise.all([
@@ -449,7 +492,7 @@ async function statusCommand(context: CommandContext, flags: ParsedArgs['flags']
 }
 
 async function inboxCommand(context: CommandContext, flags: ParsedArgs['flags']): Promise<number> {
-  const config = await getConfig(context, flags);
+  const { config } = await getProjectContext(context, flags);
   printJson(context, await inboxItems(config, 1_000));
   return 0;
 }
@@ -464,10 +507,10 @@ async function doctorCommand(context: CommandContext, flags: ParsedArgs['flags']
 }
 
 async function mcpCommand(context: CommandContext, flags: ParsedArgs['flags']): Promise<number> {
-  const config = await getConfig(context, flags);
-  const configured = createMcpRuntime(config);
+  const { config, project } = await getProjectContext(context, flags);
+  const configured = createMcpRuntime(config, project);
   try {
-    await configured.index.rebuild(rootsFor(config));
+    await configured.index.rebuild(rootsFor(config, project));
     await runMcpStdio(configured.runtime);
     return 0;
   } catch (error) {
@@ -477,9 +520,9 @@ async function mcpCommand(context: CommandContext, flags: ParsedArgs['flags']): 
 }
 
 async function serveCommand(context: CommandContext, flags: ParsedArgs['flags']): Promise<number> {
-  const config = await getConfig(context, flags);
+  const { config, project } = await getProjectContext(context, flags);
   const assetsRoot = stringFlag(flags, 'assets');
-  const handle = await startServe(config, {
+  const handle = await startServe(config, project, {
     ...(assetsRoot === undefined ? {} : { assetsRoot }),
     watch: !booleanFlag(flags, 'no-watch'),
   });
@@ -547,8 +590,10 @@ async function codexHookCommand(
         ? resolve(hookInput.cwd)
         : context.cwd;
     const hookContext: CommandContext = { ...context, cwd: hookCwd };
-    const config = await getConfig(hookContext, flags);
-    const project = projectRef(hookCwd);
+    const mode: ProjectContextMode = hookInput.hook_event_name === 'SessionEnd'
+      ? 'read-only'
+      : 'ensure';
+    const { config, project } = await getProjectContext(hookContext, flags, mode);
     if (hookInput.hook_event_name === 'SessionEnd') {
       return await runCodexHook(
         hookInput,
@@ -556,7 +601,8 @@ async function codexHookCommand(
           projectRoot: project.root,
           projectId: project.id,
           projectName: project.name,
-          runtimeRoot: config.projectMemoryDir,
+          projectAliases: project.legacyIds,
+          ...(project.manifestExists ? { runtimeRoot: config.projectMemoryDir } : {}),
         },
         { stdout: context.stdout, stderr: context.stderr },
       );
@@ -564,7 +610,7 @@ async function codexHookCommand(
 
     const index = new SqliteMemoryIndex({ path: config.indexPath });
     try {
-      await index.rebuild(rootsFor(config));
+      await index.rebuild(rootsFor(config, project));
       return await runCodexHook(
         hookInput,
         {
@@ -572,6 +618,7 @@ async function codexHookCommand(
           projectRoot: project.root,
           projectId: project.id,
           projectName: project.name,
+          projectAliases: project.legacyIds,
           runtimeRoot: config.projectMemoryDir,
           tokenBudget: numberFlag(flags, 'token-budget') ?? 2_000,
         },
@@ -614,12 +661,14 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
     if (command === 'remember') {
       const content = stringFlag(flags, 'content') ?? positionals.slice(1).join(' ');
       if (content.trim() === '') throw new Error('remember requires memory content');
-      return rememberCommand(context, await getConfig(context, flags), flags, content);
+      const projectContext = await getProjectContext(context, flags);
+      return rememberCommand(context, projectContext.config, projectContext.project, flags, content);
     }
     if (command === 'checkpoint') {
       const content = stringFlag(flags, 'content') ?? positionals.slice(1).join(' ');
       if (content.trim() === '') throw new Error('checkpoint requires an explicit summary');
-      return rememberCommand(context, await getConfig(context, flags), flags, content, {
+      const projectContext = await getProjectContext(context, flags);
+      return rememberCommand(context, projectContext.config, projectContext.project, flags, content, {
         scope: 'session',
         type: 'event',
       });

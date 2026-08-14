@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, test } from 'vitest';
@@ -37,6 +37,40 @@ afterEach(async () => {
 });
 
 describe('RepoRecall CLI', () => {
+  test('automatically bootstraps a project scope on Codex SessionStart', async () => {
+    const root = await fixture();
+    const project = join(root, 'new-project');
+    const output: string[] = [];
+    const errors: string[] = [];
+    const context = {
+      ...io(project, output, errors),
+      stdin: stdin(JSON.stringify({ hook_event_name: 'SessionStart', cwd: project })),
+    };
+
+    await expect(runCli(['codex-hook', 'SessionStart'], context)).resolves.toBe(0);
+
+    await expect(readFile(join(project, '.reporecall', 'project.md'), 'utf8')).resolves.toContain(
+      'kind: project',
+    );
+    await expect(readdir(join(project, '.reporecall', 'memories'))).resolves.toEqual([]);
+    expect(errors).toEqual([]);
+  });
+
+  test('does not bootstrap a missing project during Codex SessionEnd', async () => {
+    const root = await fixture();
+    const project = join(root, 'session-end-only');
+    const output: string[] = [];
+    const errors: string[] = [];
+    const context = {
+      ...io(project, output, errors),
+      stdin: stdin(JSON.stringify({ hook_event_name: 'SessionEnd', cwd: project })),
+    };
+
+    await expect(runCli(['codex-hook', 'SessionEnd'], context)).resolves.toBe(0);
+    await expect(readdir(project)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(errors).toEqual([]);
+  });
+
   test('initializes, remembers, rebuilds, and searches a custom local brain', async () => {
     const root = await fixture();
     const project = join(root, 'project');

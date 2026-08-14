@@ -11,6 +11,7 @@ import {
   startServe,
   type ServeRuntime,
 } from '../src/server.js';
+import { ensureProject } from '../src/project.js';
 import { FileInboxStore } from '@reporecall/processors';
 
 const roots: string[] = [];
@@ -155,11 +156,11 @@ describe('RepoRecall local API', () => {
     const overview = await json<{ memoryCount: number; projectCount: number; tagCount: number }>(
       await app.request('/api/overview'),
     );
-    expect(overview).toMatchObject({ memoryCount: 2, projectCount: 1, tagCount: 1 });
+    expect(overview).toMatchObject({ memoryCount: 2, projectCount: 2, tagCount: 1 });
     expect(
       await json<{ projects: Array<{ id: string }> }>(await app.request('/api/projects')),
     ).toMatchObject({
-      projects: [{ id: 'demo' }],
+      projects: [{ id: 'demo' }, { id: 'project' }],
     });
     expect(
       await json<{ tags: Array<{ name: string; count: number }> }>(await app.request('/api/tags')),
@@ -172,6 +173,39 @@ describe('RepoRecall local API', () => {
     expect(graph.nodes.some((node) => node.id === first.id)).toBe(true);
     expect(graph.edges).toHaveLength(1);
     expect(graph.edges[0]).toMatchObject({ target: first.id, type: 'related_to' });
+  });
+
+  test('exposes an initialized project even when it has no memories', async () => {
+    const { root } = await fixture();
+    const projectRoot = join(root, 'project');
+    const project = await ensureProject(projectRoot, join(projectRoot, '.reporecall'));
+    const config: RepoRecallConfig = {
+      brainPath: join(root, 'brain'),
+      projectMemoryDir: project.memoryDir,
+      indexPath: join(root, 'cache', 'index.sqlite'),
+      port: 0,
+      ignoredPaths: [],
+      processor: 'disabled',
+      processorMode: 'conservative',
+      sources: [],
+    };
+    const runtime = createServeRuntime(config, project);
+    runtimes.push(runtime);
+    await runtime.rebuild();
+    const app = createApiApp(runtime);
+
+    expect(await json<{ memoryCount: number; projectCount: number }>(await app.request('/api/overview'))).toMatchObject({
+      memoryCount: 0,
+      projectCount: 1,
+    });
+    expect(
+      await json<{
+        projects: Array<{ id: string; current: boolean; memoryCount: number }>;
+      }>(await app.request('/api/projects')),
+    ).toMatchObject({
+      projects: [{ id: project.id, current: true, memoryCount: 0 }],
+      count: 1,
+    });
   });
 
   test('lists Inbox and accepts or dismisses suggestions with user choices', async () => {

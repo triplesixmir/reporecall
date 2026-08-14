@@ -7,6 +7,7 @@ import {
   REPORECALL_MANAGED_BLOCK,
 } from '@reporecall/integrations';
 import { stringifyConfig } from './config.js';
+import { discoverProject, ensureProject } from './project.js';
 
 const BEGIN_MARKER = REPORECALL_BEGIN_MARKER;
 const END_MARKER = REPORECALL_END_MARKER;
@@ -22,6 +23,8 @@ export type InitializeOptions = {
 
 export type InitializeReport = {
   projectRoot?: string;
+  projectId?: string;
+  manifestPath?: string;
   brainPath: string;
   configPath: string;
   agentsPath?: string;
@@ -98,25 +101,26 @@ export async function initializeBrain(options: { brainPath: string }): Promise<I
 }
 
 export async function initializeProject(options: InitializeOptions): Promise<InitializeReport> {
-  const projectRoot = resolve(options.cwd ?? process.cwd());
-  const projectMemoryDir = resolve(options.projectMemoryDir ?? join(projectRoot, '.reporecall'));
+  const discovered = await discoverProject(resolve(options.cwd ?? process.cwd()));
+  const projectRoot = discovered.root;
   const brain = await initializeBrain({ brainPath: options.brainPath });
-  const createdDirectories = await ensureMemoryDirectories(projectMemoryDir);
-  const configPath = join(projectMemoryDir, 'config.toml');
-  await writeIfMissing(
-    configPath,
-    stringifyConfig({
+  const project = await ensureProject(projectRoot, options.projectMemoryDir, {
+    projectConfig: stringifyConfig({
       brainPath: options.brainConfigPath ?? '~/.reporecall/brain',
       indexPath: 'index.sqlite',
       processor: 'disabled',
       processorMode: 'conservative',
     }),
-  );
+  });
+  const createdDirectories = await ensureMemoryDirectories(project.memoryDir);
+  const configPath = join(project.memoryDir, 'config.toml');
   const agentsPath = resolve(options.agentsPath ?? join(projectRoot, 'AGENTS.md'));
   await mkdir(dirname(agentsPath), { recursive: true });
   const agents = await updateAgents(agentsPath);
   return {
     projectRoot,
+    projectId: project.id,
+    manifestPath: project.manifestPath,
     brainPath: brain.brainPath,
     configPath,
     agentsPath,

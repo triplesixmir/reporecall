@@ -414,9 +414,16 @@ export class SqliteMemoryIndex implements MemoryIndex {
       conditions.push('m.scope = ?');
       params.push(request.scope);
     }
-    if (request.projectId !== undefined) {
+    const projectIds = [
+      ...(request.projectId === undefined ? [] : [request.projectId]),
+      ...(request.projectIds ?? []),
+    ].filter((id, index, values) => id !== '' && values.indexOf(id) === index);
+    if (projectIds.length === 1) {
       conditions.push('m.project_id = ?');
-      params.push(request.projectId);
+      params.push(projectIds[0] as string);
+    } else if (projectIds.length > 1) {
+      conditions.push(`m.project_id IN (${projectIds.map(() => '?').join(', ')})`);
+      params.push(...projectIds);
     }
     if (request.workspaceId !== undefined) {
       conditions.push('m.workspace_id = ?');

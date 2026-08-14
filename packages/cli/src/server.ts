@@ -34,6 +34,7 @@ import { SqliteMemoryIndex } from '@reporecall/index';
 import { FileInboxStore } from '@reporecall/processors';
 import { FileMemoryStore } from '@reporecall/storage';
 import { type RepoRecallConfig } from './config.js';
+import type { ResolvedProject } from './project.js';
 
 type JsonObject = Record<string, unknown>;
 type ApiStatus = 400 | 404 | 409 | 500;
@@ -314,6 +315,10 @@ function projectFromConfig(config: RepoRecallConfig): ProjectRef {
   return { id, root: projectRoot, name };
 }
 
+function projectReference(project: ResolvedProject): ProjectRef {
+  return { id: project.id, root: project.root, name: project.name };
+}
+
 function storeForScope(runtime: ServeRuntime, scope: MemoryScope): FileMemoryStore {
   if (scope === 'global') return runtime.stores.global;
   if (scope === 'session') return runtime.stores.session;
@@ -476,8 +481,11 @@ function notFound(message: string): never {
   throw new ApiError(404, message);
 }
 
-export function createServeRuntime(config: RepoRecallConfig): ServeRuntime {
-  const project = projectFromConfig(config);
+export function createServeRuntime(
+  config: RepoRecallConfig,
+  resolvedProject?: ResolvedProject,
+): ServeRuntime {
+  const project = resolvedProject === undefined ? projectFromConfig(config) : projectReference(resolvedProject);
   const stores = {
     global: new FileMemoryStore({ root: config.brainPath, scope: 'global' }),
     project: new FileMemoryStore({ root: config.projectMemoryDir, scope: 'project' }),
@@ -519,7 +527,9 @@ export function createApiApp(runtime: ServeRuntime): Hono {
 
   app.get('/api/overview', async (context: Context) => {
     const records = await listMemories(runtime);
-    const projects = new Set(records.map((record) => record.project?.id).filter(Boolean));
+    const projects = new Set(
+      [runtime.project.id, ...records.map((record) => record.project?.id).filter(Boolean)],
+    );
     const tags = new Set(records.flatMap((record) => record.tags.map((tag) => tag.name)));
     const activeCount = records.filter((record) => record.status === 'active').length;
     const inbox = await pendingInbox(runtime);
@@ -595,11 +605,25 @@ export function createApiApp(runtime: ServeRuntime): Hono {
 
   app.get('/api/projects', async (context: Context) => {
     const records = await listMemories(runtime);
+    const inbox = await pendingInbox(runtime);
     const projects = new Map<string, ProjectRef>();
     for (const record of records) {
       if (record.project !== undefined) projects.set(record.project.id, record.project);
     }
-    const values = [...projects.values()].sort((left, right) => left.id.localeCompare(right.id));
+    projects.set(runtime.project.id, runtime.project);
+    const values = [...projects.values()]
+      .map((project) => {
+        const projectRecords = records.filter((record) => record.project?.id === project.id);
+        return {
+          ...project,
+          memoryCount: projectRecords.length,
+          activeCount: projectRecords.filter((record) => record.status === 'active').length,
+          inboxCount: inbox.filter((item) => item.suggested.project?.id === project.id).length,
+          current: project.id === runtime.project.id,
+          ready: true,
+        };
+      })
+      .sort((left, right) => left.id.localeCompare(right.id));
     return context.json({ projects: values, count: values.length });
   });
 
@@ -849,11 +873,25 @@ async function closeServer(server: ServerType): Promise<void> {
   });
 }
 
+export function startServe(
+  config: RepoRecallConfig,
+  options?: ServeOptions,
+): Promise<ServeHandle>;
+export function startServe(
+  config: RepoRecallConfig,
+  project: ResolvedProject,
+  options?: ServeOptions,
+): Promise<ServeHandle>;
 export async function startServe(
   config: RepoRecallConfig,
-  options: ServeOptions = {},
+  projectOrOptions: ResolvedProject | ServeOptions = {},
+  providedOptions: ServeOptions = {},
 ): Promise<ServeHandle> {
-  const runtime = createServeRuntime(config);
+  const resolvedProject = 'manifestPath' in projectOrOptions ? projectOrOptions : undefined;
+  const options: ServeOptions = resolvedProject === undefined
+    ? projectOrOptions as ServeOptions
+    : providedOptions;
+  const runtime = createServeRuntime(config, resolvedProject);
   let watcher: MemoryWatcher | undefined;
   let server: ServerType | undefined;
   try {

@@ -9,14 +9,21 @@ import { runCodexHook, type HookIO } from '@reporecall/integrations';
 import { createMemoryMcpServer } from '@reporecall/mcp';
 import type { RepoRecallConfig } from '../src/config.js';
 import { createMcpRuntime } from '../src/index.js';
+import { ensureProject, type ResolvedProject } from '../src/project.js';
 
 const roots: string[] = [];
 
-async function fixture(): Promise<{ root: string; config: RepoRecallConfig }> {
+async function fixture(): Promise<{
+  root: string;
+  config: RepoRecallConfig;
+  project: ResolvedProject;
+}> {
   const root = await mkdtemp(join(tmpdir(), 'reporecall-cli-mcp-runtime-'));
   roots.push(root);
+  const project = await ensureProject(join(root, 'project'), join(root, 'project', '.reporecall'));
   return {
     root,
+    project,
     config: {
       brainPath: join(root, 'brain'),
       projectMemoryDir: join(root, 'project', '.reporecall'),
@@ -36,8 +43,8 @@ afterEach(async () => {
 
 describe('CLI-created MCP runtime', () => {
   test('shares processor stores and Inbox with the explicit MCP tool', async () => {
-    const { root, config } = await fixture();
-    const configured = createMcpRuntime(config);
+    const { root, config, project } = await fixture();
+    const configured = createMcpRuntime(config, project);
     const server = createMemoryMcpServer(configured.runtime);
     const client = new Client({ name: 'reporecall-cli-mcp-test', version: '0.1.0' });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -55,7 +62,16 @@ describe('CLI-created MCP runtime', () => {
           project: { id: 'demo', root: join(root, 'project'), name: 'Demo' },
         },
       ]);
+      expect(configured.runtime.project).toMatchObject({ id: project.id, root: project.root });
       await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+      const remembered = await client.callTool({
+        name: 'memory_remember',
+        arguments: { content: 'The MCP runtime supplies the stable project by default.' },
+      });
+      expect(remembered.structuredContent).toMatchObject({
+        record: { project: { id: project.id, root: project.root } },
+      });
 
       const result = await client.callTool({
         name: 'memory_process',
@@ -85,8 +101,8 @@ describe('CLI-created MCP runtime', () => {
   });
 
   test('automatically persists a candidate and recalls it through SessionStart context', async () => {
-    const { root, config } = await fixture();
-    const configured = createMcpRuntime(config);
+    const { root, config, project } = await fixture();
+    const configured = createMcpRuntime(config, project);
     const server = createMemoryMcpServer(configured.runtime);
     const client = new Client({ name: 'reporecall-cli-auto-capture-test', version: '0.1.0' });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -105,6 +121,7 @@ describe('CLI-created MCP runtime', () => {
           project: { id: 'demo', root: projectRoot },
         },
       ]);
+      expect(configured.runtime.project).toMatchObject({ id: project.id, root: project.root });
       await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
 
       const result = await client.callTool({

@@ -161,6 +161,7 @@ export type MemoryFile = {
 export type MemoryFilters = {
   scope?: MemoryScope;
   projectId?: string;
+  projectIds?: string[];
   workspaceId?: string;
   type?: MemoryType;
   priority?: MemoryPriority;
@@ -193,6 +194,7 @@ export type MemoryIndex = {
 
 export type ContextRequest = {
   project?: ProjectRef;
+  projectAliases?: string[];
   workspace?: WorkspaceRef;
   query?: string;
   tokenBudget: number;

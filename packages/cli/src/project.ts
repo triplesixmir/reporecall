@@ -1,7 +1,7 @@
 import { execFile as execFileCallback } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { basename, join, resolve } from 'node:path';
+import { basename, isAbsolute, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import {
   type ProjectRecord,
@@ -15,7 +15,6 @@ import {
 const execFile = promisify(execFileCallback);
 
 const DEFAULT_PROJECT_CONFIG = [
-  'brain_path = "~/.reporecall/brain"',
   'index_path = "index.sqlite"',
   'processor = "disabled"',
   'processor_mode = "conservative"',
@@ -30,11 +29,13 @@ export type ResolvedProject = ProjectRecord & {
   manifestPath: string;
   legacyIds: string[];
   created: boolean;
+  manifestExists: boolean;
 };
 
 export type ProjectResolverOptions = {
   now?: () => string;
   runGit?: GitCommandRunner;
+  projectConfig?: string;
 };
 
 type GitDiscovery = {
@@ -133,7 +134,7 @@ async function discoverGit(cwd: string, runGit: GitCommandRunner): Promise<GitDi
 }
 
 function legacyIdsFor(root: string, memoryDir: string, currentId: string): string[] {
-  return [...new Set([slugFor(basename(root)), slugFor(basename(memoryDir))])].filter(
+  return [...new Set([slugFor(basename(root)), 'reporecall', slugFor(basename(memoryDir))])].filter(
     (id) => id !== currentId,
   );
 }
@@ -144,6 +145,7 @@ function runtimeProject(
   memoryDir: string,
   manifestPath: string,
   created: boolean,
+  manifestExists: boolean,
 ): ResolvedProject {
   return {
     ...record,
@@ -152,6 +154,7 @@ function runtimeProject(
     manifestPath,
     legacyIds: legacyIdsFor(root, memoryDir, record.id),
     created,
+    manifestExists,
   };
 }
 
@@ -165,7 +168,7 @@ export async function discoverProject(
   const memoryDir = resolve(join(root, '.reporecall'));
   const manifestPath = join(root, '.reporecall', 'project.md');
   const existing = await readProjectManifest(manifestPath);
-  if (existing !== null) return runtimeProject(existing, root, memoryDir, manifestPath, false);
+  if (existing !== null) return runtimeProject(existing, root, memoryDir, manifestPath, false, true);
 
   const now = options.now?.() ?? defaultNow();
   const record: ProjectRecord = discovery.remote === undefined
@@ -191,7 +194,7 @@ export async function discoverProject(
           updatedAt: now,
         };
       })();
-  return runtimeProject(record, root, memoryDir, manifestPath, false);
+  return runtimeProject(record, root, memoryDir, manifestPath, false, false);
 }
 
 async function writeIfMissing(path: string, content: string): Promise<void> {
@@ -216,7 +219,11 @@ export async function ensureProject(
   options: ProjectResolverOptions = {},
 ): Promise<ResolvedProject> {
   const discovered = await discoverProject(cwd, options);
-  const memoryDir = resolve(configuredMemoryDir ?? discovered.memoryDir);
+  const memoryDir = configuredMemoryDir === undefined
+    ? discovered.memoryDir
+    : isAbsolute(configuredMemoryDir)
+      ? resolve(configuredMemoryDir)
+      : resolve(discovered.root, configuredMemoryDir);
   let record: ProjectRecord = {
     schema: discovered.schema,
     kind: discovered.kind,
@@ -241,6 +248,9 @@ export async function ensureProject(
   }
 
   await ensureScopeDirectories(memoryDir);
-  await writeIfMissing(join(memoryDir, 'config.toml'), DEFAULT_PROJECT_CONFIG);
-  return runtimeProject(record, discovered.root, memoryDir, discovered.manifestPath, created);
+  await writeIfMissing(
+    join(memoryDir, 'config.toml'),
+    options.projectConfig ?? DEFAULT_PROJECT_CONFIG,
+  );
+  return runtimeProject(record, discovered.root, memoryDir, discovered.manifestPath, created, true);
 }

@@ -24,6 +24,7 @@ export type CodexHookRuntime = {
   projectRoot?: string;
   projectId?: string;
   projectName?: string;
+  projectAliases?: string[];
   workspace?: WorkspaceRef;
   tokenBudget?: number;
   runtimeRoot?: string;
@@ -57,6 +58,7 @@ async function injectContext(event: CodexHookEvent, runtime: CodexHookRuntime, i
   const request: ContextRequest = {
     tokenBudget: runtime.tokenBudget ?? 2_000,
     ...(contextProject === undefined ? {} : { project: contextProject }),
+    ...(runtime.projectAliases === undefined ? {} : { projectAliases: runtime.projectAliases }),
     ...(runtime.workspace === undefined ? {} : { workspace: runtime.workspace }),
   };
   const bundle = await runtime.contextBuilder.build(request);

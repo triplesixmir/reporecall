@@ -24,6 +24,7 @@ import {
   type MemoryScope,
   type MemoryStore,
   type MemoryTag,
+  type ProjectRef,
   type UpdateMemoryInput,
 } from '@reporecall/core';
 
@@ -42,6 +43,8 @@ export type MemoryWriteOperation = 'create' | 'update' | 'resolve' | 'checkpoint
 export type MemoryMcpRuntime = {
   store: MemoryStore;
   stores?: Partial<Record<MemoryScope, MemoryStore>>;
+  project?: ProjectRef;
+  projectAliases?: string[];
   index: Pick<MemoryIndex, 'search'>;
   contextBuilder: ContextBuilder;
   afterWrite?: (record: MemoryRecord, operation: MemoryWriteOperation) => Promise<void>;
@@ -164,8 +167,11 @@ function success<T extends Record<string, unknown>>(data: T, summary: string): C
   };
 }
 
-function projectRef(arguments_: ProjectArguments): CreateMemoryInput['project'] {
-  if (arguments_.projectId === undefined && arguments_.projectRoot === undefined) return undefined;
+function projectRef(
+  arguments_: ProjectArguments,
+  fallback?: ProjectRef,
+): CreateMemoryInput['project'] {
+  if (arguments_.projectId === undefined && arguments_.projectRoot === undefined) return fallback;
   const root = arguments_.projectRoot ?? arguments_.projectId ?? 'project';
   const id = arguments_.projectId ?? root;
   return {
@@ -246,8 +252,11 @@ async function listAll(
   });
 }
 
-function contextProject(arguments_: ProjectArguments): ContextRequest['project'] {
-  return projectRef(arguments_);
+function contextProject(
+  arguments_: ProjectArguments,
+  fallback?: ProjectRef,
+): ContextRequest['project'] {
+  return projectRef(arguments_, fallback);
 }
 
 function captureWorkspace(arguments_: {
@@ -325,11 +334,12 @@ export function createMemoryMcpServer(runtime: MemoryMcpRuntime): McpServer {
       inputSchema: contextInputSchema,
     },
     async (arguments_) => {
-      const currentProject = contextProject(arguments_);
+      const currentProject = contextProject(arguments_, runtime.project);
       const bundle = await runtime.contextBuilder.build({
         ...(arguments_.query === undefined ? {} : { query: arguments_.query }),
         tokenBudget: arguments_.tokenBudget,
         ...(currentProject === undefined ? {} : { project: currentProject }),
+        ...(runtime.projectAliases === undefined ? {} : { projectAliases: runtime.projectAliases }),
         ...(arguments_.workspaceId === undefined
           ? {}
           : {
@@ -384,7 +394,7 @@ export function createMemoryMcpServer(runtime: MemoryMcpRuntime): McpServer {
           ],
         };
       }
-      const project = projectRef(arguments_);
+      const project = projectRef(arguments_, runtime.project);
       const workspace = captureWorkspace(arguments_);
       const capture = redactedSessionCaptureSchema.parse({
         content: redactContent(arguments_.content),
@@ -423,7 +433,7 @@ export function createMemoryMcpServer(runtime: MemoryMcpRuntime): McpServer {
           ],
         };
       }
-      const project = projectRef(arguments_);
+      const project = projectRef(arguments_, runtime.project);
       const workspace = captureWorkspace(arguments_);
       const capture = redactedSessionCaptureSchema.parse({
         content: arguments_.content,
@@ -453,7 +463,9 @@ export function createMemoryMcpServer(runtime: MemoryMcpRuntime): McpServer {
     },
     async (arguments_) => {
       const content = redactContent(arguments_.content);
-      const project = arguments_.scope === 'global' ? undefined : projectRef(arguments_);
+      const project = arguments_.scope === 'global'
+        ? undefined
+        : projectRef(arguments_, runtime.project);
       const tags = agentTags(arguments_.tags);
       const record = await writeRecord(
         runtime,
@@ -483,7 +495,7 @@ export function createMemoryMcpServer(runtime: MemoryMcpRuntime): McpServer {
       inputSchema: updateInputSchema,
     },
     async (arguments_) => {
-      const project = projectRef(arguments_);
+      const project = projectRef(arguments_, runtime.project);
       const patch: UpdateMemoryInput = {
         ...(arguments_.content === undefined ? {} : { content: redactContent(arguments_.content) }),
         ...(arguments_.scope === undefined ? {} : { scope: arguments_.scope }),
@@ -528,7 +540,7 @@ export function createMemoryMcpServer(runtime: MemoryMcpRuntime): McpServer {
       inputSchema: checkpointInputSchema,
     },
     async (arguments_) => {
-      const project = projectRef(arguments_);
+      const project = projectRef(arguments_, runtime.project);
       const record = await writeRecord(
         runtime,
         {
