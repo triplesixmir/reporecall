@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, test } from 'vitest';
 import { FileInboxStore } from '@reporecall/processors';
-import { FileMemoryStore } from '@reporecall/storage';
+import { FileMemoryStore, FileProjectRegistry } from '@reporecall/storage';
 import { runCli, type CliIO } from '../src/index.js';
 
 const roots: string[] = [];
@@ -53,6 +53,30 @@ describe('RepoRecall CLI', () => {
       'kind: project',
     );
     await expect(readdir(join(project, '.reporecall', 'memories'))).resolves.toEqual([]);
+    expect(errors).toEqual([]);
+  });
+
+  test('registers an automatically bootstrapped project for the local workbench', async () => {
+    const root = await fixture();
+    const project = join(root, 'registered-project');
+    const brain = join(root, 'brain');
+    const output: string[] = [];
+    const errors: string[] = [];
+    const context = {
+      ...io(project, output, errors),
+      stdin: stdin(JSON.stringify({ hook_event_name: 'SessionStart', cwd: project })),
+    };
+
+    await expect(runCli(['codex-hook', 'SessionStart', '--brain', brain], context)).resolves.toBe(0);
+
+    const projects = await new FileProjectRegistry({ brainPath: brain }).list();
+    expect(projects).toMatchObject([
+      {
+        name: 'registered-project',
+        root: project,
+        memoryDir: join(project, '.reporecall'),
+      },
+    ]);
     expect(errors).toEqual([]);
   });
 

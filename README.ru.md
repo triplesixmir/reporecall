@@ -130,6 +130,16 @@ reporecall codex-hook <event>   обработать Codex lifecycle hook
 
 `reporecall serve` поднимает локальный API для workbench: memory CRUD, recent, projects, tags, Inbox actions, relation graph, overview и health. По умолчанию API loopback-only.
 
+Workbench работает сразу с несколькими проектами. Успешный `SessionStart` в
+Codex регистрирует текущий checkout в небольшом локальном runtime registry.
+После этого `serve` читает global brain и Markdown-каталоги `.reporecall`
+зарегистрированных проектов, поэтому memories из разных репозиториев видны в
+одном локальном интерфейсе. Registry хранит только локальные данные для
+обнаружения проектов, не является источником памяти, не попадает в public
+repository и восстанавливается при следующем открытии проектов в Codex.
+Project Markdown остаётся в своём репозитории и не копируется молча в global
+brain.
+
 MCP server model-agnostic и возвращает structured data вместе с коротким human-readable summary. MCP writes сохраняют user-owned tags и используют те же redaction rules, что CLI.
 
 Codex adapter устанавливает MCP command и managed blocks, не перезаписывая пользовательский текст и unrelated hooks. Поддерживаемая точка входа — `reporecall codex install --scope user`. `SessionStart` и `PostCompact` инжектируют детерминированный context, а managed instructions просят agent после meaningful-задач вызвать `memory_auto_capture`; пользователю не нужно вручную вводить memory command. `SessionEnd` пишет только lifecycle marker. При ошибке hook работает fail-open и не зависит от нестабильного transcript format.

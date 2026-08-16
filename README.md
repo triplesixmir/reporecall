@@ -130,6 +130,15 @@ Paths and behavior can be changed with CLI flags or TOML configuration. Preceden
 
 `reporecall serve` provides a local API for the workbench: memory CRUD, recent records, projects, tags, Inbox actions, relation graph, overview, and health. The API is intentionally loopback-only unless a caller explicitly supplies another hostname through the server API.
 
+The workbench is multi-project. A successful Codex `SessionStart` registers the
+current checkout in a small local runtime registry. `serve` then reads the
+global brain and the registered projects' `.reporecall` Markdown directories,
+so memories from several repositories appear in one local UI. The registry
+stores only local discovery metadata and is not a memory source, is not copied
+into the public repository, and can be recreated by opening the projects in
+Codex again. Project Markdown remains in its own repository; it is never
+silently copied into the global brain.
+
 The MCP server is model-agnostic and returns both structured data and a short human-readable summary. MCP writes preserve user-owned tags and run the same redaction rules as the CLI.
 
 The Codex adapter installs the MCP command and managed blocks without overwriting user text or unrelated hooks. `reporecall codex install --scope user` is the supported entry point. `SessionStart` and `PostCompact` inject deterministic context, while the managed instructions ask the agent to call `memory_auto_capture` after meaningful tasks; the user does not need to type a memory command. `SessionEnd` writes only a lifecycle marker. Hook failures are fail-open, and no unstable transcript format is required.

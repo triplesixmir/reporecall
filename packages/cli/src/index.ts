@@ -16,7 +16,7 @@ import { SqliteMemoryIndex } from '@reporecall/index';
 import { CodexAdapter, runCodexHook, type CodexHookInput } from '@reporecall/integrations';
 import { runMcpStdio, type InboxItem, type MemoryMcpRuntime } from '@reporecall/mcp';
 import { FileInboxStore } from '@reporecall/processors';
-import { FileMemoryStore } from '@reporecall/storage';
+import { FileMemoryStore, FileProjectRegistry } from '@reporecall/storage';
 import { initializeBrain, initializeProject } from './init.js';
 import { createProcessingRuntime } from './processing.js';
 import {
@@ -147,6 +147,30 @@ async function getProjectContext(
   if (mode === 'ensure' && resolve(config.projectMemoryDir) !== project.memoryDir) {
     project = await ensureProject(discovered.root, config.projectMemoryDir);
     config = await getConfig(rootContext, flags);
+  }
+
+  if (project.manifestExists) {
+    try {
+      await new FileProjectRegistry({ brainPath: config.brainPath }).upsert({
+        schema: project.schema,
+        kind: project.kind,
+        id: project.id,
+        name: project.name,
+        identity: project.identity,
+        ...(project.remoteFingerprint === undefined
+          ? {}
+          : { remoteFingerprint: project.remoteFingerprint }),
+        createdAt: project.createdAt,
+        updatedAt: project.updatedAt,
+        root: project.root,
+        memoryDir: config.projectMemoryDir,
+        manifestPath: project.manifestPath,
+      });
+    } catch (error) {
+      context.stderr(
+        `RepoRecall project registry warning: ${error instanceof Error ? error.message : String(error)}\n`,
+      );
+    }
   }
 
   return {

@@ -134,9 +134,9 @@ async function discoverGit(cwd: string, runGit: GitCommandRunner): Promise<GitDi
 }
 
 function legacyIdsFor(root: string, memoryDir: string, currentId: string): string[] {
-  return [...new Set([slugFor(basename(root)), 'reporecall', slugFor(basename(memoryDir))])].filter(
-    (id) => id !== currentId,
-  );
+  return [
+    ...new Set([root, memoryDir, slugFor(basename(root)), 'reporecall', slugFor(basename(memoryDir))]),
+  ].filter((id) => id !== currentId);
 }
 
 function runtimeProject(

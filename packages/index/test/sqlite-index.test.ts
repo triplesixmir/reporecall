@@ -98,6 +98,22 @@ describe('SqliteMemoryIndex', () => {
     index.close();
   });
 
+  test('normalizes legacy project metadata to the source project identity', async () => {
+    const root = await createFixture();
+    await writeMemory(root, 'mem_legacy_source', 'Legacy metadata should still recall.', {
+      project: { id: root, root, name: 'Legacy Demo' },
+    });
+    const canonicalProject = { id: 'proj_git_current', root: '/new/demo', name: 'Demo' };
+    const index = new SqliteMemoryIndex({ path: join(root, 'index.sqlite') });
+
+    await index.rebuild([{ root, scope: 'project', project: canonicalProject }]);
+
+    await expect(index.search({ query: 'legacy metadata' })).resolves.toMatchObject([
+      { record: { project: canonicalProject } },
+    ]);
+    index.close();
+  });
+
   test('updates a manually edited file and removes deleted files incrementally', async () => {
     const root = await createFixture();
     const { path, record } = await writeMemory(root, 'mem_edit', 'Original content.');

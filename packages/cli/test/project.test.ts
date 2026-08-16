@@ -94,6 +94,14 @@ describe('project resolver', () => {
     await expect(mkdir(join(memoryDir, 'sessions'))).rejects.toThrow(/exist/i);
   });
 
+  test('keeps absolute path aliases for memories created before stable project IDs', async () => {
+    const root = await projectDirectory('legacy-aliases');
+    const project = await ensureProject(root, undefined, options(missingGit));
+
+    expect(project.legacyIds).toContain(root);
+    expect(project.legacyIds).toContain(project.memoryDir);
+  });
+
   test('preserves a malformed existing manifest', async () => {
     const root = await projectDirectory('malformed');
     const manifestPath = join(root, '.reporecall', 'project.md');
