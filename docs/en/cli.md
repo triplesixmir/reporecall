@@ -2,25 +2,62 @@
 
 ## Commands
 
-| Command      | Purpose                                                          |
-| ------------ | ---------------------------------------------------------------- |
-| `init`       | Create project memory directories, config, and managed guidance. |
-| `brain init` | Create a global brain at the resolved or custom path.            |
-| `status`     | Validate canonical files and report index errors.                |
-| `doctor`     | Check Node.js version and storage/index health.                  |
-| `remember`   | Write an explicit durable memory after redaction.                |
-| `search`     | Search the SQLite index.                                         |
-| `inbox`      | Print pending processor suggestions.                             |
-| `rebuild`    | Recreate the disposable index from Markdown.                     |
-| `config`     | Print resolved TOML configuration as JSON.                       |
-| `checkpoint` | Persist an explicit session event.                               |
-| `serve`      | Start API, compiled UI, watcher, and local index.                |
-| `mcp`        | Run the stdio MCP server.                                        |
-| `codex install`   | Install the Codex MCP server and managed lifecycle hooks.   |
-| `codex uninstall` | Remove only RepoRecall-managed Codex settings.             |
-| `codex-hook` | Handle a `SessionStart`, `PostCompact`, or `SessionEnd` event.   |
+| Command           | Purpose                                                          |
+| ----------------- | ---------------------------------------------------------------- |
+| `init`            | Create project memory directories, config, and managed guidance. |
+| `brain init`      | Create a global brain at the resolved or custom path.            |
+| `status`          | Validate canonical files and report index errors.                |
+| `doctor`          | Check Node.js version and storage/index health.                  |
+| `remember`        | Write an explicit durable memory after redaction.                |
+| `process`         | Process an explicitly supplied redacted capture.                 |
+| `search`          | Search the SQLite index.                                         |
+| `inbox`           | Print pending processor suggestions.                             |
+| `rebuild`         | Recreate the disposable index from Markdown.                     |
+| `config`          | Print resolved TOML configuration as JSON.                       |
+| `checkpoint`      | Persist an explicit session event.                               |
+| `serve`           | Start API, compiled UI, watcher, and local index.                |
+| `mcp`             | Run the stdio MCP server.                                        |
+| `codex install`   | Install the Codex MCP server and managed lifecycle hooks.        |
+| `codex uninstall` | Remove only RepoRecall-managed Codex settings.                   |
+| `codex-hook`      | Handle a `SessionStart`, `PostCompact`, or `SessionEnd` event.   |
 
 The source checkout can run commands with `pnpm exec tsx packages/cli/src/bin.ts`. A built checkout can use `node packages/cli/dist/bin.js`.
+
+Project bootstrap is automatic for `remember`, `process`, `search`, `rebuild`,
+`status`, `inbox`, `checkpoint`, `serve`, and `mcp`. The resolver finds the Git
+root and ensures `<root>/.reporecall/project.md`, `config.toml`, `memories/`,
+`inbox/`, and `sessions/`. `init` remains the explicit/idempotent command for
+custom brain setup and managed `AGENTS.md`; it is not required before opening a
+new repository in Codex.
+
+## Explicit processor workflow
+
+Process a deliberately supplied capture with the local marker provider:
+
+```bash
+reporecall process \
+  --processor agent-native \
+  --content "Decision: keep Markdown canonical."
+```
+
+For structured input, pipe a JSON object containing `content` and optional
+`capturedAt`, `sessionId`, `project`, `workspace`, and `explicit` fields:
+
+```bash
+reporecall process --processor agent-native --json < capture.json
+```
+
+The capture is scanned locally before provider invocation. In `conservative`
+mode provider suggestions are written to the Markdown Inbox; `balanced` may
+persist high-confidence suggestions; `automatic` requires both configured
+automatic mode and the per-invocation `--allow-automatic` flag. Explicit items
+in the capture are durable according to their declared scope. The raw capture
+is not written to `sessions/` and hooks do not call this command implicitly.
+
+Use `--processor ollama`, `--processor openrouter`, or
+`--processor openai-compatible` for the existing HTTP providers. Credentials
+remain environment variables. `--json` returns durable records, Inbox items,
+duplicates, warnings, provider, and mode.
 
 ## Configuration
 
@@ -42,7 +79,7 @@ Paths are resolved relative to the file that declares them. `~` expands against 
 
 - `0`: operation completed successfully.
 - `1`: command or validation failure.
-- `2`: a requested memory write was refused because content was empty or secret-only.
+- `2`: a requested memory write or processor capture was refused because content was empty or secret-only.
 
 `serve` reports a friendly bind error when the port or hostname is unavailable. `codex-hook` is fail-open and returns `0` after reporting hook failures to stderr.
 
@@ -52,4 +89,4 @@ Use `reporecall codex install --scope user` for the normal Codex setup. Pass
 
 ## API development
 
-`createApiApp(runtime)` exposes the Hono app without opening a TCP socket, which makes route contracts testable with `app.request()`. `startServe(config)` adds rebuild, optional static assets, watcher, and loopback HTTP lifecycle.
+`createApiApp(runtime)` exposes the Hono app without opening a TCP socket, which makes route contracts testable with `app.request()`. `startServe(config, project)` adds rebuild, optional static assets, watcher, and loopback HTTP lifecycle. The resolved project is passed separately from the config so a custom memory directory cannot be mistaken for the project root.

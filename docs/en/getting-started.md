@@ -11,19 +11,22 @@ pnpm check
 
 `pnpm check` runs ESLint, strict TypeScript, Vitest, and all workspace builds. `pnpm test:e2e` builds the web app, starts a local Vite preview, and runs browser smoke tests.
 
-## 2. Initialize a project
+## 2. Initialize a brain and connect Codex
 
-From a repository directory:
+From a repository directory, explicit initialization is still available:
 
 ```bash
 pnpm exec tsx packages/cli/src/bin.ts init --yes
 ```
 
-This is idempotent. It creates `.reporecall/`, writes configuration, and adds a managed block to `AGENTS.md` while preserving text outside that block. Use `--brain /absolute/path` for a custom global brain. `reporecall brain init --brain /absolute/path` initializes only that brain.
+This is idempotent. It creates the project manifest and `.reporecall/`, writes
+configuration, and adds a managed block to `AGENTS.md` while preserving text
+outside that block. Use `--brain /absolute/path` for a custom global brain.
+`reporecall brain init --brain /absolute/path` initializes only that brain.
 
 For a non-Git directory, initialization still works. Git is useful for syncing project Markdown, but is not required by the storage layer.
 
-After installing the CLI, connect Codex:
+After installing the CLI, connect Codex once for the current user:
 
 ```bash
 reporecall codex install --scope user
@@ -33,6 +36,23 @@ reporecall doctor
 This makes Codex retrieve current context at session start and after compaction.
 It does not silently turn a transcript into durable memory; use an explicit
 `remember` or `checkpoint` write when something should persist.
+
+After installation, no per-project `init` is required. When Codex starts in a
+new folder, RepoRecall finds the Git root and creates:
+
+```text
+<project-root>/.reporecall/
+  project.md
+  memories/
+  inbox/
+  sessions/
+  config.toml
+```
+
+`project.md` stores only versioned project metadata. A Git remote gives clones
+the same stable project ID; a local-only project stores a generated UUID in the
+manifest. Returning to the folder reuses the existing manifest without
+rewriting it.
 
 ## 3. Create and find memory
 

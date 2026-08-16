@@ -17,8 +17,9 @@ RepoRecall — локальный, независимый от модели сл
 - Детерминированная сборка контекста с приоритетом pinned/project-current и token budget.
 - Безопасные CLI-команды для init, remember, search, Inbox, checkpoint, rebuild, doctor и serve.
 - Loopback Hono API и React/Vite workbench.
-- Stdio MCP tools для context, search, recent, durable writes, resolve, checkpoint и Inbox.
+- Stdio MCP tools для context, search, recent, automatic agent capture, durable writes, resolve, checkpoint, explicit processing и Inbox.
 - Codex adapter для MCP, managed `AGENTS.md` и hooks `SessionStart`, `PostCompact`, `SessionEnd`.
+- Automatic project bootstrap: первая Codex-сессия сама создаёт и переиспользует стабильный project identity без отдельной команды для каждого проекта.
 - Опциональные processors: `agent-native`, Ollama, OpenRouter и OpenAI-compatible HTTP providers.
 - Secret scanner и redaction до записи в durable storage.
 
@@ -58,6 +59,12 @@ reporecall doctor
 Codex не находится в `PATH`, укажите его через
 `--codex-executable /path/to/codex`.
 
+После этой одноразовой установки откройте Codex в любом репозитории. RepoRecall
+найдёт Git root, при необходимости создаст `.reporecall/project.md` и project
+scope, а при следующих сессиях переиспользует тот же project identity.
+`reporecall init` остаётся полезной для явной настройки, custom brain path и
+managed `AGENTS.md`, но для каждого нового репозитория больше не обязательна.
+
 ## File-first storage
 
 Canonical layout остаётся inspectable и Git-friendly:
@@ -71,13 +78,19 @@ Canonical layout остаётся inspectable и Git-friendly:
 
 your-project/
   .reporecall/
+    project.md                  # stable project metadata; можно коммитить
     memories/mem_<uuid>.md
     inbox/inbox_<uuid>.md
     sessions/<id>.md
     config.toml
 ```
 
-Project memory живёт рядом с checkout и может коммититься. Global brain обычно остаётся на private filesystem или private remote. Session captures redacted и временные: raw transcript не сохраняется, а durable summary появляется только после явного checkpoint.
+Project memory живёт рядом с checkout и может коммититься. Global brain обычно остаётся на private filesystem или private remote. Agent-native captures короткие и redacted: raw transcript не сохраняется, а durable session summary появляется только после явного checkpoint.
+
+Project manifest — не memory и не индексируется как memory. Для Git-проекта его
+ID получается из normalized remote fingerprint; для local-only folder это UUID,
+сохранённый в `project.md`. В manifest не записываются raw remote, absolute
+machine path, credentials или transcript.
 
 ## Scope и context
 
@@ -98,6 +111,7 @@ reporecall brain init           инициализировать custom global b
 reporecall status               проверить files и health индекса
 reporecall doctor               проверить runtime и storage
 reporecall remember <text>      создать явную durable memory
+reporecall process --content    обработать явный redacted capture
 reporecall search <query>       искать в локальном SQLite index
 reporecall inbox                показать processor suggestions
 reporecall rebuild              пересобрать SQLite из Markdown
@@ -116,15 +130,33 @@ reporecall codex-hook <event>   обработать Codex lifecycle hook
 
 `reporecall serve` поднимает локальный API для workbench: memory CRUD, recent, projects, tags, Inbox actions, relation graph, overview и health. По умолчанию API loopback-only.
 
+Workbench работает сразу с несколькими проектами. Успешный `SessionStart` в
+Codex регистрирует текущий checkout в небольшом локальном runtime registry.
+После этого `serve` читает global brain и Markdown-каталоги `.reporecall`
+зарегистрированных проектов, поэтому memories из разных репозиториев видны в
+одном локальном интерфейсе. Registry хранит только локальные данные для
+обнаружения проектов, не является источником памяти, не попадает в public
+repository и восстанавливается при следующем открытии проектов в Codex.
+Project Markdown остаётся в своём репозитории и не копируется молча в global
+brain.
+
 MCP server model-agnostic и возвращает structured data вместе с коротким human-readable summary. MCP writes сохраняют user-owned tags и используют те же redaction rules, что CLI.
 
-Codex adapter устанавливает MCP command и managed blocks, не перезаписывая пользовательский текст и unrelated hooks. Поддерживаемая точка входа — `reporecall codex install --scope user`; `SessionStart` и `PostCompact` инжектируют детерминированный context. `SessionEnd` пишет только lifecycle marker. При ошибке hook работает fail-open и не зависит от нестабильного transcript format.
+Codex adapter устанавливает MCP command и managed blocks, не перезаписывая пользовательский текст и unrelated hooks. Поддерживаемая точка входа — `reporecall codex install --scope user`. `SessionStart` и `PostCompact` инжектируют детерминированный context, а managed instructions просят agent после meaningful-задач вызвать `memory_auto_capture`; пользователю не нужно вручную вводить memory command. `SessionEnd` пишет только lifecycle marker. При ошибке hook работает fail-open и не зависит от нестабильного transcript format.
 
-Это automatic retrieval контекста, а не тихое создание памяти. Agent явно пишет
-durable record через `memory_remember` или `reporecall remember`; durable summary
-сессии появляется только после явного checkpoint. По умолчанию processor отключён
-ради privacy. Если нужны suggestions, processor включается отдельно и пишет их
-в Inbox.
+`memory_auto_capture` получает короткий redacted summary задачи и structured
+candidates, выбранные agent-ом. Explicit candidates сразу записываются в
+canonical Markdown и индексируются; provider-generated suggestions продолжают
+следовать processor mode, а в `conservative` попадают в Inbox. По умолчанию
+processor отключён ради privacy, но для agent-selected candidates внешний
+provider не нужен. Для прямой записи используйте `memory_remember` или
+`reporecall remember`, а для durable session event — `memory_checkpoint`.
+
+Явную capture можно обработать через `reporecall process --content "..."` или
+передать JSON в stdin с флагом `--json`. Provider получает только redacted
+content; в `conservative` mode suggestions попадают в Inbox. Для конкретного
+запуска `automatic` нужен явный `--allow-automatic`. Сама capture временная и
+никогда не сохраняется как session transcript.
 
 ## Privacy и processors
 
@@ -145,21 +177,22 @@ Graph — projection indexed relations, а не отдельное хранил�
 
 ## Git и cross-device workflow
 
-1. Machine A создаёт memory через `remember` или workbench.
-2. Commit-ит project `.reporecall/memories/*.md`.
-3. Machine B делает pull или clone.
-4. Machine B запускает `reporecall rebuild`.
-5. Тот же context builder получает memory из Markdown без копирования SQLite и machine-specific paths.
+1. Machine A открывает репозиторий в Codex; первая сессия автоматически создаёт `.reporecall/project.md`.
+2. Machine A создаёт memory через `remember` или workbench.
+3. Commit-ит `project.md` и project `.reporecall/memories/*.md`.
+4. Machine B делает pull или clone.
+5. Machine B запускает `reporecall rebuild` или открывает Codex, и hook пересобирает index.
+6. Тот же context builder получает memory из Markdown без копирования SQLite и machine-specific paths.
 
 Private global memories не должны попадать в public repositories. Для sensitive project memory используйте private remotes.
 
 Для личной работы на нескольких устройствах держите два репозитория
 раздельно:
 
-| Репозиторий | Visibility | Содержимое |
-| ----------- | ---------- | ---------- |
-| `triplesixmir/reporecall` | public | source, tests, CI, bilingual documentation |
-| `YOUR_GITHUB_USER/reporecall-private-memory` | private | ваш Markdown brain и safe RepoRecall config |
+| Репозиторий                                  | Visibility | Содержимое                                  |
+| -------------------------------------------- | ---------- | ------------------------------------------- |
+| `triplesixmir/reporecall`                    | public     | source, tests, CI, bilingual documentation  |
+| `YOUR_GITHUB_USER/reporecall-private-memory` | private    | ваш Markdown brain и safe RepoRecall config |
 
 На новом Windows-компьютере сначала клонируйте private brain, затем подключите
 его к проекту:
@@ -169,11 +202,13 @@ $Brain = Join-Path $env:USERPROFILE ".reporecall\brain"
 git clone git@github.com:YOUR_GITHUB_USER/reporecall-private-memory.git $Brain
 reporecall brain init --brain $Brain
 cd C:\path\to\your-project
-reporecall init --yes --brain $Brain
-reporecall rebuild --brain $Brain
 reporecall codex install --scope user
 reporecall doctor
 ```
+
+После этого запустите Codex в проекте: project scope создастся автоматически.
+`reporecall init --yes --brain $Brain` всё ещё доступна, если нужно заранее
+создать managed block в `AGENTS.md`.
 
 Public source checkout устанавливается отдельно через Node.js и pnpm. Перед
 работой на втором устройстве подтяните private brain, а перед push проверьте

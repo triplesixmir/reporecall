@@ -4,8 +4,10 @@ import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { afterEach, describe, expect, test } from 'vitest';
+import type { ProcessedCaptureResult, RedactedSessionCapture } from '@reporecall/core';
 import { DeterministicContextBuilder } from '@reporecall/context';
 import { SqliteMemoryIndex } from '@reporecall/index';
+import { FileInboxStore, createMemoryProcessingService } from '@reporecall/processors';
 import { FileMemoryStore } from '@reporecall/storage';
 import { createMemoryMcpServer, type MemoryMcpRuntime } from '../src/index.js';
 
@@ -29,13 +31,18 @@ async function connectedRuntime(): Promise<{
   const store = new FileMemoryStore({ root, scope: 'project' });
   const sessionStore = new FileMemoryStore({ root, scope: 'session' });
   const index = new SqliteMemoryIndex({ path: join(root, 'index.sqlite') });
-  const contextBuilder = new DeterministicContextBuilder(index, { now: '2026-08-13T10:00:00.000Z' });
+  const contextBuilder = new DeterministicContextBuilder(index, {
+    now: '2026-08-13T10:00:00.000Z',
+  });
   const runtime: MemoryMcpRuntime = {
     store,
     stores: { session: sessionStore },
     index,
     contextBuilder,
-    afterWrite: async (record) => index.update([join(root, record.scope === 'session' ? 'sessions' : 'memories', `${record.id}.md`)]),
+    afterWrite: async (record) =>
+      index.update([
+        join(root, record.scope === 'session' ? 'sessions' : 'memories', `${record.id}.md`),
+      ]),
     listInbox: () => Promise.resolve([]),
   };
   const server = createMemoryMcpServer(runtime);
@@ -66,9 +73,11 @@ describe('RepoRecall MCP server', () => {
     try {
       const tools = await connection.client.listTools();
       expect(tools.tools.map((tool) => tool.name).sort()).toEqual([
+        'memory_auto_capture',
         'memory_checkpoint',
         'memory_get_context',
         'memory_get_recent',
+        'memory_process',
         'memory_remember',
         'memory_resolve',
         'memory_review_inbox',
@@ -113,7 +122,9 @@ describe('RepoRecall MCP server', () => {
           tags: [{ name: 'agent-suggestion', origin: 'user' }],
         },
       });
-      const rememberedData = remembered.structuredContent as { record: { id: string; tags: Array<{ origin: string }> } };
+      const rememberedData = remembered.structuredContent as {
+        record: { id: string; tags: Array<{ origin: string }> };
+      };
       expect(rememberedData.record.tags).toEqual([{ name: 'agent-suggestion', origin: 'ai' }]);
 
       const userRecord = await connection.runtime.store.create({
@@ -147,21 +158,30 @@ describe('RepoRecall MCP server', () => {
         name: 'memory_resolve',
         arguments: { id: userRecord.id },
       });
-      expect(resolved.structuredContent).toMatchObject({ record: { id: userRecord.id, status: 'resolved' } });
+      expect(resolved.structuredContent).toMatchObject({
+        record: { id: userRecord.id, status: 'resolved' },
+      });
 
       const checkpoint = await connection.client.callTool({
         name: 'memory_checkpoint',
-        arguments: { content: 'Explicit session checkpoint.', projectId: 'demo-project', projectRoot: connection.project },
+        arguments: {
+          content: 'Explicit session checkpoint.',
+          projectId: 'demo-project',
+          projectRoot: connection.project,
+        },
       });
       expect(checkpoint.structuredContent).toMatchObject({
         record: { type: 'event', scope: 'session', content: 'Explicit session checkpoint.' },
       });
       const checkpointId = (checkpoint.structuredContent as { record: { id: string } }).record.id;
-      await expect(readFile(join(connection.root, 'sessions', `${checkpointId}.md`), 'utf8')).resolves.toContain(
-        'Explicit session checkpoint.',
-      );
+      await expect(
+        readFile(join(connection.root, 'sessions', `${checkpointId}.md`), 'utf8'),
+      ).resolves.toContain('Explicit session checkpoint.');
 
-      const recent = await connection.client.callTool({ name: 'memory_get_recent', arguments: { limit: 10 } });
+      const recent = await connection.client.callTool({
+        name: 'memory_get_recent',
+        arguments: { limit: 10 },
+      });
       expect(recent.structuredContent).toMatchObject({ count: 3 });
       const context = await connection.client.callTool({
         name: 'memory_get_context',
@@ -169,7 +189,10 @@ describe('RepoRecall MCP server', () => {
       });
       const contextData = context.structuredContent as { bundle?: { items?: unknown } } | undefined;
       expect(Array.isArray(contextData?.bundle?.items)).toBe(true);
-      const inbox = await connection.client.callTool({ name: 'memory_review_inbox', arguments: {} });
+      const inbox = await connection.client.callTool({
+        name: 'memory_review_inbox',
+        arguments: {},
+      });
       expect(inbox.structuredContent).toEqual({ items: [], count: 0 });
 
       const indexed = await connection.runtime.index.search({ query: 'disposable cache' });
@@ -186,7 +209,9 @@ describe('RepoRecall MCP server', () => {
         name: 'memory_remember',
         arguments: { content: 'Keep this note, token=sk-proj-1234567890abcdef.' },
       });
-      expect(warning.structuredContent).toMatchObject({ record: { content: 'Keep this note, token=[REDACTED api-key].' } });
+      expect(warning.structuredContent).toMatchObject({
+        record: { content: 'Keep this note, token=[REDACTED api-key].' },
+      });
 
       const blocked = await connection.client.callTool({
         name: 'memory_remember',
@@ -204,10 +229,205 @@ describe('RepoRecall MCP server', () => {
     try {
       const before = await connection.runtime.store.list();
       expect(before).toHaveLength(0);
-      const result = await connection.client.callTool({ name: 'memory_get_recent', arguments: { limit: 10 } });
+      const result = await connection.client.callTool({
+        name: 'memory_get_recent',
+        arguments: { limit: 10 },
+      });
       expect(result.structuredContent).toEqual({ records: [], count: 0 });
       expect(await connection.runtime.store.list()).toHaveLength(0);
-      await expect(readFile(join(connection.root, 'sessions', 'session.md'), 'utf8')).rejects.toThrow();
+      await expect(
+        readFile(join(connection.root, 'sessions', 'session.md'), 'utf8'),
+      ).rejects.toThrow();
+    } finally {
+      await connection.close();
+    }
+  });
+
+  test('automatically captures structured agent candidates into durable memory and the index', async () => {
+    const connection = await connectedRuntime();
+    try {
+      const service = createMemoryProcessingService({
+        store: connection.runtime.store,
+        inbox: new FileInboxStore({ root: connection.root }),
+        providerKind: 'disabled',
+        mode: 'conservative',
+        afterDurable: async (record) =>
+          connection.index.update([
+            join(
+              connection.root,
+              record.scope === 'session' ? 'sessions' : 'memories',
+              `${record.id}.md`,
+            ),
+          ]),
+      });
+      connection.runtime.processCapture = (capture, options) => service.process(capture, options);
+
+      const result = await connection.client.callTool({
+        name: 'memory_auto_capture',
+        arguments: {
+          content: 'Completed the repository architecture review.',
+          sessionId: 'session-auto-1',
+          projectId: 'demo-project',
+          projectRoot: connection.project,
+          memories: [
+            {
+              content: 'Markdown is the durable source of truth; SQLite is rebuildable.',
+              scope: 'project',
+              type: 'decision',
+              priority: 'high',
+              tags: [{ name: 'architecture', origin: 'user' }],
+            },
+          ],
+        },
+      });
+
+      expect(result.isError).not.toBe(true);
+      expect(result.structuredContent).toMatchObject({
+        durable: [
+          {
+            content: 'Markdown is the durable source of truth; SQLite is rebuildable.',
+            tags: [{ name: 'architecture', origin: 'ai' }],
+          },
+        ],
+        inbox: [],
+      });
+      expect(
+        (await connection.index.search({ query: 'SQLite rebuildable' }))[0]?.record.content,
+      ).toContain('SQLite is rebuildable');
+
+      const duplicate = await connection.client.callTool({
+        name: 'memory_auto_capture',
+        arguments: {
+          content: 'Revisited the same architecture decision.',
+          projectId: 'demo-project',
+          projectRoot: connection.project,
+          memories: [
+            {
+              content: 'Markdown is the durable source of truth; SQLite is rebuildable.',
+              scope: 'project',
+              type: 'decision',
+              priority: 'high',
+            },
+          ],
+        },
+      });
+
+      expect(duplicate.structuredContent).toMatchObject({
+        durable: [],
+        inbox: [],
+        duplicates: [
+          {
+            existing: {
+              content: 'Markdown is the durable source of truth; SQLite is rebuildable.',
+            },
+          },
+        ],
+      });
+      expect(await connection.runtime.store.list()).toHaveLength(1);
+    } finally {
+      await connection.close();
+    }
+  });
+
+  test('redacts automatic captures and rejects a secret-only summary', async () => {
+    const connection = await connectedRuntime();
+    try {
+      const service = createMemoryProcessingService({
+        store: connection.runtime.store,
+        inbox: new FileInboxStore({ root: connection.root }),
+        providerKind: 'disabled',
+        mode: 'conservative',
+      });
+      connection.runtime.processCapture = (capture, options) => service.process(capture, options);
+
+      const warning = await connection.client.callTool({
+        name: 'memory_auto_capture',
+        arguments: {
+          content: 'Keep this decision, token=sk-proj-1234567890abcdef.',
+          memories: [
+            {
+              content: 'Never commit token sk-proj-1234567890abcdef to the repository.',
+              scope: 'project',
+              type: 'constraint',
+            },
+          ],
+        },
+      });
+
+      expect(warning.isError).not.toBe(true);
+      expect(JSON.stringify(warning.structuredContent)).not.toContain('sk-proj-1234567890abcdef');
+      expect(warning.structuredContent).toMatchObject({
+        durable: [{ content: 'Never commit token [REDACTED api-key] to the repository.' }],
+      });
+
+      const blocked = await connection.client.callTool({
+        name: 'memory_auto_capture',
+        arguments: { content: 'sk-proj-1234567890abcdef', memories: [] },
+      });
+
+      expect(blocked.isError).toBe(true);
+      expect(await connection.runtime.store.list()).toHaveLength(1);
+    } finally {
+      await connection.close();
+    }
+  });
+
+  test('processes an explicit capture through the configured callback', async () => {
+    const connection = await connectedRuntime();
+    try {
+      let receivedCapture: RedactedSessionCapture | undefined;
+      let receivedOptions: { allowAutomatic: boolean } | undefined;
+      const processed: ProcessedCaptureResult = {
+        durable: [],
+        inbox: [],
+        duplicates: [],
+        warnings: [],
+        provider: 'agent-native',
+        mode: 'conservative',
+      };
+      connection.runtime.processCapture = (capture, options) => {
+        receivedCapture = capture;
+        receivedOptions = options;
+        return Promise.resolve(processed);
+      };
+
+      const result = await connection.client.callTool({
+        name: 'memory_process',
+        arguments: {
+          content: 'Decision: keep this explicit.',
+          projectId: 'demo-project',
+          projectRoot: connection.project,
+          projectName: 'Demo project',
+          allowAutomatic: true,
+        },
+      });
+
+      expect(result.isError).not.toBe(true);
+      expect(result.structuredContent).toEqual(processed);
+      expect(result.content[0]).toMatchObject({ type: 'text' });
+      expect((result.content[0] as { text: string }).text).toMatch(/1?0 durable.*Inbox/i);
+      expect(receivedCapture).toMatchObject({
+        content: 'Decision: keep this explicit.',
+        project: { id: 'demo-project', root: connection.project, name: 'Demo project' },
+      });
+      expect(receivedOptions).toEqual({ allowAutomatic: true });
+    } finally {
+      await connection.close();
+    }
+  });
+
+  test('reports processing unavailable when the runtime has no callback', async () => {
+    const connection = await connectedRuntime();
+    try {
+      const result = await connection.client.callTool({
+        name: 'memory_process',
+        arguments: { content: 'This must not be stored implicitly.' },
+      });
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0]).toMatchObject({ type: 'text' });
+      expect((result.content[0] as { text: string }).text).toMatch(/processing.*unavailable/i);
+      expect(await connection.runtime.store.list()).toHaveLength(0);
     } finally {
       await connection.close();
     }

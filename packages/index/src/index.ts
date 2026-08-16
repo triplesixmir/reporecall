@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import { createHash } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
+import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import {
   parseMemoryFile,
   type IndexError,
@@ -203,6 +203,7 @@ function recordsPath(root: string, scope: MemorySourceRoot['scope']): string {
 export class SqliteMemoryIndex implements MemoryIndex {
   readonly path: string;
   private readonly db: DatabaseHandle;
+  private sources: MemorySourceRoot[] = [];
 
   constructor(options: SqliteMemoryIndexOptions) {
     this.path = options.path;
@@ -344,6 +345,25 @@ export class SqliteMemoryIndex implements MemoryIndex {
     this.db.prepare('DELETE FROM index_errors WHERE path = ?').run(path);
   }
 
+  private sourceForPath(path: string): MemorySourceRoot | undefined {
+    const absolutePath = resolve(path);
+    return this.sources.find((source) => {
+      const recordsRoot = resolve(recordsPath(source.root, source.scope));
+      const candidate = relative(recordsRoot, absolutePath);
+      return candidate !== '' && !candidate.startsWith('..') && !isAbsolute(candidate);
+    });
+  }
+
+  private normalizeRecord(record: MemoryRecord, source: MemorySourceRoot | undefined): MemoryRecord {
+    if (
+      source?.project === undefined ||
+      (record.scope !== 'project' && record.scope !== 'session')
+    ) {
+      return record;
+    }
+    return { ...record, project: source.project };
+  }
+
   private async indexPath(path: string): Promise<{ indexed: number; invalid: ValidationReport['invalid'] }> {
     let source: string;
     try {
@@ -354,7 +374,8 @@ export class SqliteMemoryIndex implements MemoryIndex {
     }
 
     try {
-      this.storeRecord(path, source, parseMemoryFile(source, path));
+      const record = this.normalizeRecord(parseMemoryFile(source, path), this.sourceForPath(path));
+      this.storeRecord(path, source, record);
       return { indexed: 1, invalid: [] };
     } catch (error) {
       this.storeError(path, source, error);
@@ -366,6 +387,7 @@ export class SqliteMemoryIndex implements MemoryIndex {
   }
 
   async rebuild(sources: MemorySourceRoot[]): Promise<RebuildReport> {
+    this.sources = [...sources];
     const files = await this.listSourceFiles(sources);
     const previous = this.db.prepare('SELECT path FROM indexed_files').all() as unknown as Array<{ path: string }>;
     const current = new Set(files);
@@ -414,9 +436,16 @@ export class SqliteMemoryIndex implements MemoryIndex {
       conditions.push('m.scope = ?');
       params.push(request.scope);
     }
-    if (request.projectId !== undefined) {
+    const projectIds = [
+      ...(request.projectId === undefined ? [] : [request.projectId]),
+      ...(request.projectIds ?? []),
+    ].filter((id, index, values) => id !== '' && values.indexOf(id) === index);
+    if (projectIds.length === 1) {
       conditions.push('m.project_id = ?');
-      params.push(request.projectId);
+      params.push(projectIds[0] as string);
+    } else if (projectIds.length > 1) {
+      conditions.push(`m.project_id IN (${projectIds.map(() => '?').join(', ')})`);
+      params.push(...projectIds);
     }
     if (request.workspaceId !== undefined) {
       conditions.push('m.workspace_id = ?');

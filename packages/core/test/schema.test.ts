@@ -3,7 +3,9 @@ import {
   createMemoryRecord,
   memoryRecordSchema,
   migrateMemoryRecord,
+  redactedSessionCaptureSchema,
   type CreateMemoryInput,
+  type ProcessedCaptureResult,
 } from '../src/index.js';
 
 const input: CreateMemoryInput = {
@@ -77,5 +79,40 @@ describe('memory schema', () => {
 
   test('rejects records from a future schema version', () => {
     expect(() => migrateMemoryRecord({ schema: 2 })).toThrow(/newer than supported/i);
+  });
+
+  test('validates an explicit processor capture without allowing extra fields', () => {
+    const result = redactedSessionCaptureSchema.safeParse({
+      content: 'Decision: keep the index disposable.',
+      capturedAt: '2026-08-14T12:00:00.000Z',
+      sessionId: 'session-demo',
+      project: { id: 'demo', root: '/tmp/demo', name: 'Demo' },
+      workspace: { id: 'workspace-demo', name: 'Demo workspace' },
+      explicit: [{ content: 'A user checkpoint.', scope: 'project', type: 'event' }],
+    });
+
+    expect(result.success).toBe(true);
+    expect(
+      redactedSessionCaptureSchema.safeParse({ content: '', extra: true }).success,
+    ).toBe(false);
+    expect(
+      redactedSessionCaptureSchema.safeParse({
+        content: 'Invalid timestamp',
+        capturedAt: 'not-a-date',
+      }).success,
+    ).toBe(false);
+  });
+
+  test('accepts a processor result with stable metadata', () => {
+    const result: ProcessedCaptureResult = {
+      durable: [],
+      inbox: [],
+      duplicates: [],
+      warnings: [],
+      provider: 'agent-native',
+      mode: 'conservative',
+    };
+
+    expect(result.provider).toBe('agent-native');
   });
 });

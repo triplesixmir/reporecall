@@ -11,7 +11,9 @@ import {
   startServe,
   type ServeRuntime,
 } from '../src/server.js';
+import { ensureProject } from '../src/project.js';
 import { FileInboxStore } from '@reporecall/processors';
+import { FileProjectRegistry, FileMemoryStore } from '@reporecall/storage';
 
 const roots: string[] = [];
 const runtimes: ServeRuntime[] = [];
@@ -155,11 +157,11 @@ describe('RepoRecall local API', () => {
     const overview = await json<{ memoryCount: number; projectCount: number; tagCount: number }>(
       await app.request('/api/overview'),
     );
-    expect(overview).toMatchObject({ memoryCount: 2, projectCount: 1, tagCount: 1 });
+    expect(overview).toMatchObject({ memoryCount: 2, projectCount: 2, tagCount: 1 });
     expect(
       await json<{ projects: Array<{ id: string }> }>(await app.request('/api/projects')),
     ).toMatchObject({
-      projects: [{ id: 'demo' }],
+      projects: [{ id: 'demo' }, { id: 'project' }],
     });
     expect(
       await json<{ tags: Array<{ name: string; count: number }> }>(await app.request('/api/tags')),
@@ -172,6 +174,166 @@ describe('RepoRecall local API', () => {
     expect(graph.nodes.some((node) => node.id === first.id)).toBe(true);
     expect(graph.edges).toHaveLength(1);
     expect(graph.edges[0]).toMatchObject({ target: first.id, type: 'related_to' });
+  });
+
+  test('exposes an initialized project even when it has no memories', async () => {
+    const { root } = await fixture();
+    const projectRoot = join(root, 'project');
+    const project = await ensureProject(projectRoot, join(projectRoot, '.reporecall'));
+    const config: RepoRecallConfig = {
+      brainPath: join(root, 'brain'),
+      projectMemoryDir: project.memoryDir,
+      indexPath: join(root, 'cache', 'index.sqlite'),
+      port: 0,
+      ignoredPaths: [],
+      processor: 'disabled',
+      processorMode: 'conservative',
+      sources: [],
+    };
+    const runtime = createServeRuntime(config, project);
+    runtimes.push(runtime);
+    await runtime.rebuild();
+    const app = createApiApp(runtime);
+
+    expect(await json<{ memoryCount: number; projectCount: number }>(await app.request('/api/overview'))).toMatchObject({
+      memoryCount: 0,
+      projectCount: 1,
+    });
+    expect(
+      await json<{
+        projects: Array<{ id: string; current: boolean; memoryCount: number }>;
+      }>(await app.request('/api/projects')),
+    ).toMatchObject({
+      projects: [{ id: project.id, current: true, memoryCount: 0 }],
+      count: 1,
+    });
+  });
+
+  test('loads registered project memories into the central workbench', async () => {
+    const { root } = await fixture();
+    const currentRoot = join(root, 'current');
+    const remoteRoot = join(root, 'locus');
+    const currentProject = await ensureProject(currentRoot, join(currentRoot, '.reporecall'));
+    const registeredProject = await ensureProject(remoteRoot, join(remoteRoot, '.reporecall'));
+    const registeredStore = new FileMemoryStore({
+      root: registeredProject.memoryDir,
+      scope: 'project',
+    });
+    await registeredStore.create({
+      content: 'Locus project memory is available in the central workbench.',
+      scope: 'project',
+      type: 'fact',
+      project: { id: remoteRoot, root: remoteRoot, name: 'Legacy Locus' },
+    });
+
+    const config: RepoRecallConfig = {
+      brainPath: join(root, 'brain'),
+      projectMemoryDir: currentProject.memoryDir,
+      indexPath: join(root, 'cache', 'index.sqlite'),
+      port: 0,
+      ignoredPaths: [],
+      processor: 'disabled',
+      processorMode: 'conservative',
+      sources: [],
+    };
+    await new FileProjectRegistry({ brainPath: config.brainPath }).upsert({
+      schema: registeredProject.schema,
+      kind: registeredProject.kind,
+      id: registeredProject.id,
+      name: registeredProject.name,
+      identity: registeredProject.identity,
+      ...(registeredProject.remoteFingerprint === undefined
+        ? {}
+        : { remoteFingerprint: registeredProject.remoteFingerprint }),
+      createdAt: registeredProject.createdAt,
+      updatedAt: registeredProject.updatedAt,
+      root: remoteRoot,
+      memoryDir: registeredProject.memoryDir,
+      manifestPath: registeredProject.manifestPath,
+    });
+
+    const runtime = createServeRuntime(config, currentProject, [
+      {
+        schema: registeredProject.schema,
+        kind: registeredProject.kind,
+        id: registeredProject.id,
+        name: registeredProject.name,
+        identity: registeredProject.identity,
+        ...(registeredProject.remoteFingerprint === undefined
+          ? {}
+          : { remoteFingerprint: registeredProject.remoteFingerprint }),
+        createdAt: registeredProject.createdAt,
+        updatedAt: registeredProject.updatedAt,
+        root: remoteRoot,
+        memoryDir: registeredProject.memoryDir,
+        manifestPath: registeredProject.manifestPath,
+        lastSeenAt: registeredProject.updatedAt,
+      },
+    ]);
+    runtimes.push(runtime);
+    await runtime.rebuild();
+    const app = createApiApp(runtime);
+    const memories = await json<{ memories: Array<{ content: string }>; count: number }>(
+      await app.request(`/api/memories?projectId=${encodeURIComponent(registeredProject.id)}`),
+    );
+    expect(memories).toMatchObject({
+      count: 1,
+      memories: [{ content: 'Locus project memory is available in the central workbench.' }],
+    });
+    const projects = await json<{ projects: Array<{ id: string }>; count: number }>(
+      await app.request('/api/projects'),
+    );
+    expect(projects.projects.map((project) => project.id)).toContain(registeredProject.id);
+    expect(projects.count).toBe(2);
+  });
+
+  test('refreshes the project registry while the workbench is running', async () => {
+    const { root } = await fixture();
+    const currentRoot = join(root, 'current');
+    const remoteRoot = join(root, 'new-project');
+    const currentProject = await ensureProject(currentRoot, join(currentRoot, '.reporecall'));
+    const registeredProject = await ensureProject(remoteRoot, join(remoteRoot, '.reporecall'));
+    const config: RepoRecallConfig = {
+      brainPath: join(root, 'brain'),
+      projectMemoryDir: currentProject.memoryDir,
+      indexPath: join(root, 'cache', 'index.sqlite'),
+      port: 0,
+      ignoredPaths: [],
+      processor: 'disabled',
+      processorMode: 'conservative',
+      sources: [],
+    };
+    const runtime = createServeRuntime(config, currentProject);
+    runtimes.push(runtime);
+    await runtime.rebuild();
+    const app = createApiApp(runtime);
+
+    await new FileMemoryStore({ root: registeredProject.memoryDir, scope: 'project' }).create({
+      content: 'A project registered after the server started.',
+      scope: 'project',
+      type: 'fact',
+      project: { id: registeredProject.id, root: remoteRoot, name: registeredProject.name },
+    });
+    await new FileProjectRegistry({ brainPath: config.brainPath }).upsert({
+      schema: registeredProject.schema,
+      kind: registeredProject.kind,
+      id: registeredProject.id,
+      name: registeredProject.name,
+      identity: registeredProject.identity,
+      ...(registeredProject.remoteFingerprint === undefined
+        ? {}
+        : { remoteFingerprint: registeredProject.remoteFingerprint }),
+      createdAt: registeredProject.createdAt,
+      updatedAt: registeredProject.updatedAt,
+      root: remoteRoot,
+      memoryDir: registeredProject.memoryDir,
+      manifestPath: registeredProject.manifestPath,
+    });
+
+    const overview = await json<{ memoryCount: number; projectCount: number }>(
+      await app.request('/api/overview'),
+    );
+    expect(overview).toMatchObject({ memoryCount: 1, projectCount: 2 });
   });
 
   test('lists Inbox and accepts or dismisses suggestions with user choices', async () => {

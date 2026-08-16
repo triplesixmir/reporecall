@@ -20,4 +20,14 @@ test-results/
 
 # A global brain or an intentionally local brain directory must never enter the repository.
 brain/
+
+# Internal execution notes are local-only and never part of the public project.
+docs/superpowers/
 .pnpm-store/
+
+# This public source checkout keeps its own project memory private.
+.reporecall/project.md
+.reporecall/config.toml
+.reporecall/memories/
+.reporecall/inbox/
+.reporecall/sessions/

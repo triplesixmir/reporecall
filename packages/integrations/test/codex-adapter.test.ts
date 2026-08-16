@@ -18,8 +18,12 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
-function commands(hooks: Record<string, Array<{ hooks: Array<{ command?: string }> }>> | undefined): string[] {
-  return Object.values(hooks ?? {}).flatMap((groups) => groups.flatMap((group) => group.hooks.map((hook) => hook.command ?? '')));
+function commands(
+  hooks: Record<string, Array<{ hooks: Array<{ command?: string }> }>> | undefined,
+): string[] {
+  return Object.values(hooks ?? {}).flatMap((groups) =>
+    groups.flatMap((group) => group.hooks.map((hook) => hook.command ?? '')),
+  );
 }
 
 type HookOutput = {
@@ -36,7 +40,12 @@ function parseHookOutput(value: string): HookOutput {
 describe('Codex adapter', () => {
   test('installs idempotent MCP registration, managed instructions, and hooks', async () => {
     const { codexHome, project } = await fixture();
-    const calls: Array<{ executable: string; args: string[]; cwd: string; env: NodeJS.ProcessEnv }> = [];
+    const calls: Array<{
+      executable: string;
+      args: string[];
+      cwd: string;
+      env: NodeJS.ProcessEnv;
+    }> = [];
     const adapter = new CodexAdapter({
       codexHome,
       projectRoot: project,
@@ -53,7 +62,9 @@ describe('Codex adapter', () => {
       JSON.stringify({
         description: 'User hooks stay intact.',
         hooks: {
-          SessionStart: [{ matcher: '*', hooks: [{ type: 'command', command: 'reporecall custom-user-hook' }] }],
+          SessionStart: [
+            { matcher: '*', hooks: [{ type: 'command', command: 'reporecall custom-user-hook' }] },
+          ],
         },
       }),
       'utf8',
@@ -71,12 +82,18 @@ describe('Codex adapter', () => {
     const agents = await readFile(join(codexHome, 'AGENTS.md'), 'utf8');
     expect(agents).toContain('# Existing instructions');
     expect(agents.match(/BEGIN REPORECALL MANAGED BLOCK/g)).toHaveLength(1);
+    expect(agents).toContain('memory_auto_capture');
+    expect(agents).toContain('meaningful task');
+    expect(agents).toContain('project scope');
+    expect(agents).toContain('PostCompact');
 
     const hooks = JSON.parse(await readFile(join(codexHome, 'hooks.json'), 'utf8')) as {
       hooks?: Record<string, Array<{ hooks: Array<{ command?: string }> }>>;
     };
     const installedCommands = commands(hooks.hooks);
-    expect(installedCommands.filter((command) => command.includes('--managed-by reporecall'))).toHaveLength(3);
+    expect(
+      installedCommands.filter((command) => command.includes('--managed-by reporecall')),
+    ).toHaveLength(3);
     expect(installedCommands).toContain('reporecall custom-user-hook');
 
     const removal = await adapter.uninstall({ scope: 'user' });
@@ -85,8 +102,13 @@ describe('Codex adapter', () => {
       hooks?: Record<string, Array<{ hooks: Array<{ command?: string }> }>>;
     };
     expect(commands(remainingHooks.hooks)).toEqual(['reporecall custom-user-hook']);
-    expect(await readFile(join(codexHome, 'AGENTS.md'), 'utf8')).not.toContain('BEGIN REPORECALL MANAGED BLOCK');
-    expect(calls[2]).toMatchObject({ args: ['mcp', 'remove', 'reporecall'], env: { CODEX_HOME: codexHome } });
+    expect(await readFile(join(codexHome, 'AGENTS.md'), 'utf8')).not.toContain(
+      'BEGIN REPORECALL MANAGED BLOCK',
+    );
+    expect(calls[2]).toMatchObject({
+      args: ['mcp', 'remove', 'reporecall'],
+      env: { CODEX_HOME: codexHome },
+    });
   });
 
   test('preserves a user hook group and supports project-scoped installation', async () => {
@@ -108,6 +130,7 @@ describe('Codex adapter', () => {
       env: { CODEX_HOME: join(project, '.codex') },
     });
     expect(await readFile(join(project, 'AGENTS.md'), 'utf8')).toContain('Canonical memory files');
+    expect(await readFile(join(project, 'AGENTS.md'), 'utf8')).toContain('memory_auto_capture');
     expect(await readFile(join(project, '.codex', 'hooks.json'), 'utf8')).toContain('SessionStart');
   });
 });
@@ -117,7 +140,10 @@ describe('Codex lifecycle hooks', () => {
     const { root, project } = await fixture();
     const output: string[] = [];
     const errors: string[] = [];
-    const io: HookIO = { stdout: (value) => output.push(value), stderr: (value) => errors.push(value) };
+    const io: HookIO = {
+      stdout: (value) => output.push(value),
+      stderr: (value) => errors.push(value),
+    };
     const requests: Array<{ tokenBudget: number; project?: { id: string; root: string } }> = [];
     const runtime: CodexHookRuntime = {
       projectRoot: project,
@@ -126,21 +152,36 @@ describe('Codex lifecycle hooks', () => {
       contextBuilder: {
         build: (request) => {
           requests.push(request);
-          return Promise.resolve({ items: [], text: '### mem_demo (decision)\nKeep project conventions.', estimatedTokens: 8, omittedCount: 0 });
+          return Promise.resolve({
+            items: [],
+            text: '### mem_demo (decision)\nKeep project conventions.',
+            estimatedTokens: 8,
+            omittedCount: 0,
+          });
         },
       },
     };
 
     await expect(
       runCodexHook(
-        { hook_event_name: 'SessionStart', session_id: 'session-1', cwd: project, transcript_path: '/secret/transcript.jsonl' },
+        {
+          hook_event_name: 'SessionStart',
+          session_id: 'session-1',
+          cwd: project,
+          transcript_path: '/secret/transcript.jsonl',
+        },
         runtime,
         io,
       ),
     ).resolves.toBe(0);
     await expect(
       runCodexHook(
-        { hook_event_name: 'PostCompact', session_id: 'session-1', cwd: project, transcript_path: '/secret/transcript.jsonl' },
+        {
+          hook_event_name: 'PostCompact',
+          session_id: 'session-1',
+          cwd: project,
+          transcript_path: '/secret/transcript.jsonl',
+        },
         runtime,
         io,
       ),
@@ -149,7 +190,9 @@ describe('Codex lifecycle hooks', () => {
     const sessionStart = parseHookOutput(output[0] ?? '');
     const postCompact = parseHookOutput(output[1] ?? '');
     expect(sessionStart.hookSpecificOutput?.hookEventName).toBe('SessionStart');
-    expect(sessionStart.hookSpecificOutput?.additionalContext).toContain('Keep project conventions');
+    expect(sessionStart.hookSpecificOutput?.additionalContext).toContain(
+      'Keep project conventions',
+    );
     expect(postCompact.hookSpecificOutput?.hookEventName).toBe('PostCompact');
     expect(postCompact.hookSpecificOutput?.additionalContext).toContain('Keep project conventions');
     expect(requests).toHaveLength(2);
@@ -161,7 +204,10 @@ describe('Codex lifecycle hooks', () => {
     const { root, project } = await fixture();
     const output: string[] = [];
     const errors: string[] = [];
-    const io: HookIO = { stdout: (value) => output.push(value), stderr: (value) => errors.push(value) };
+    const io: HookIO = {
+      stdout: (value) => output.push(value),
+      stderr: (value) => errors.push(value),
+    };
     const runtime: CodexHookRuntime = { projectRoot: project, runtimeRoot: root };
 
     await expect(
@@ -188,7 +234,11 @@ describe('Codex lifecycle hooks', () => {
       contextBuilder: { build: () => Promise.reject(new Error('index unavailable')) },
     };
     await expect(
-      runCodexHook({ hook_event_name: 'SessionStart', session_id: 'session-3', cwd: project }, failing, io),
+      runCodexHook(
+        { hook_event_name: 'SessionStart', session_id: 'session-3', cwd: project },
+        failing,
+        io,
+      ),
     ).resolves.toBe(0);
     expect(errors.join(' ')).toMatch(/index unavailable/i);
   });

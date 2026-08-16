@@ -29,6 +29,7 @@ npx --no-install reporecall init --yes
 - Run `doctor` and inspect `status` for malformed files or index errors.
 - Exercise MCP with a disposable `CODEX_HOME`; never use a real user directory in tests.
 - Simulate two clones: commit only project Markdown, clone to a second directory, rebuild there, and search for the same memory.
+- Confirm a fresh Codex `SessionStart` creates `.reporecall/project.md` without a per-project `init`, and a second start reuses the same ID.
 - Confirm the second clone's context builder retrieves the same record after rebuilding its local SQLite index.
 
 ## Public-history checklist
@@ -40,4 +41,5 @@ Before a public repository or release:
 - no generated SQLite, runtime markers, browser artifacts, or build output;
 - `pnpm audit:public -- --working-tree` reports no sensitive paths or values;
 - English and Russian documentation describe the implemented behavior and limitations;
+- internal `docs/superpowers/` execution notes are ignored and absent from the public tree;
 - CI runs install, lint, typecheck, unit tests, E2E, and build on Ubuntu, macOS, and Windows.

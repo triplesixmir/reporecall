@@ -60,6 +60,25 @@ describe('DeterministicContextBuilder', () => {
     expect(bundle.items.slice(0, 2).map(({ record: item }) => item.id)).toEqual(['mem_pinned', 'mem_current']);
   });
 
+  test('treats legacy project ids as aliases of the current project', async () => {
+    const builder = new DeterministicContextBuilder(
+      fakeIndex([
+        {
+          record: record({ id: 'mem_legacy', project: { id: 'reporecall', root: '/old' } }),
+          snippet: 'legacy',
+          score: 0,
+        },
+      ]),
+    );
+
+    const bundle = await builder.build(
+      request({ project: { id: 'proj_git_current', root: '/new' }, projectAliases: ['reporecall'] }),
+    );
+
+    expect(bundle.items).toHaveLength(1);
+    expect(bundle.items[0]?.record.id).toBe('mem_legacy');
+  });
+
   test('caps each excerpt at 25 percent of the budget and respects sentence boundaries', async () => {
     const builder = new DeterministicContextBuilder(
       fakeIndex([

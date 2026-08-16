@@ -2,25 +2,61 @@
 
 ## Команды
 
-| Команда      | Назначение                                                     |
-| ------------ | -------------------------------------------------------------- |
-| `init`       | Создать project memory directories, config и managed guidance. |
-| `brain init` | Создать global brain в resolved или custom path.               |
-| `status`     | Проверить canonical files и index errors.                      |
-| `doctor`     | Проверить Node.js version, storage и index health.             |
-| `remember`   | Записать explicit durable memory после redaction.              |
-| `search`     | Искать в SQLite index.                                         |
-| `inbox`      | Показать pending processor suggestions.                        |
-| `rebuild`    | Пересоздать disposable index из Markdown.                      |
-| `config`     | Показать resolved TOML configuration как JSON.                 |
-| `checkpoint` | Сохранить явный session event.                                 |
-| `serve`      | Запустить API, compiled UI, watcher и local index.             |
-| `mcp`        | Запустить stdio MCP server.                                    |
-| `codex install`   | Установить Codex MCP и managed lifecycle hooks.            |
-| `codex uninstall` | Удалить только настройки RepoRecall в Codex.               |
-| `codex-hook` | Обработать `SessionStart`, `PostCompact` или `SessionEnd`.     |
+| Команда           | Назначение                                                     |
+| ----------------- | -------------------------------------------------------------- |
+| `init`            | Создать project memory directories, config и managed guidance. |
+| `brain init`      | Создать global brain в resolved или custom path.               |
+| `status`          | Проверить canonical files и index errors.                      |
+| `doctor`          | Проверить Node.js version, storage и index health.             |
+| `remember`        | Записать explicit durable memory после redaction.              |
+| `process`         | Обработать явно переданную redacted capture.                   |
+| `search`          | Искать в SQLite index.                                         |
+| `inbox`           | Показать pending processor suggestions.                        |
+| `rebuild`         | Пересоздать disposable index из Markdown.                      |
+| `config`          | Показать resolved TOML configuration как JSON.                 |
+| `checkpoint`      | Сохранить явный session event.                                 |
+| `serve`           | Запустить API, compiled UI, watcher и local index.             |
+| `mcp`             | Запустить stdio MCP server.                                    |
+| `codex install`   | Установить Codex MCP и managed lifecycle hooks.                |
+| `codex uninstall` | Удалить только настройки RepoRecall в Codex.                   |
+| `codex-hook`      | Обработать `SessionStart`, `PostCompact` или `SessionEnd`.     |
 
 В checkout используйте `pnpm exec tsx packages/cli/src/bin.ts`. После build — `node packages/cli/dist/bin.js`.
+
+Project bootstrap автоматически выполняется для `remember`, `process`,
+`search`, `rebuild`, `status`, `inbox`, `checkpoint`, `serve` и `mcp`. Resolver
+находит Git root и обеспечивает `<root>/.reporecall/project.md`, `config.toml`,
+`memories/`, `inbox/` и `sessions/`. `init` остаётся явной idempotent-командой
+для custom brain и managed `AGENTS.md`; перед открытием нового репозитория в
+Codex она не нужна.
+
+## Явный processor workflow
+
+Обработайте явно переданную capture через локальный marker provider:
+
+```bash
+reporecall process \
+  --processor agent-native \
+  --content "Decision: keep Markdown canonical."
+```
+
+Для structured input передайте JSON с `content` и optional-полями
+`capturedAt`, `sessionId`, `project`, `workspace` и `explicit`:
+
+```bash
+reporecall process --processor agent-native --json < capture.json
+```
+
+Capture проверяется локально до provider invocation. В `conservative` mode
+provider suggestions записываются в Markdown Inbox; `balanced` может сохранить
+high-confidence suggestions; `automatic` требует и настройки automatic mode,
+и флага `--allow-automatic` для конкретного запуска. Explicit items становятся
+durable по своему scope. Raw capture не записывается в `sessions/`, hooks не
+вызывают эту команду неявно.
+
+Можно выбрать `ollama`, `openrouter` или `openai-compatible`. Credentials
+остаются в environment variables. `--json` возвращает durable records, Inbox,
+duplicates, warnings, provider и mode.
 
 ## Configuration
 
@@ -42,7 +78,7 @@ Relative paths разрешаются относительно config file, ко
 
 - `0`: операция завершилась успешно.
 - `1`: ошибка команды или validation failure.
-- `2`: memory write отклонён из-за empty или secret-only content.
+- `2`: memory write или processor capture отклонены из-за empty или secret-only content.
 
 `serve` даёт понятную ошибку, если hostname или port недоступны. `codex-hook` fail-open и возвращает `0`, сообщая об ошибке в stderr.
 
@@ -52,4 +88,4 @@ Codex не находится в `PATH`, передайте `--codex-executable 
 
 ## API development
 
-`createApiApp(runtime)` возвращает Hono app без TCP bind, поэтому routes тестируются через `app.request()`. `startServe(config)` добавляет rebuild, static assets, watcher и loopback HTTP lifecycle.
+`createApiApp(runtime)` возвращает Hono app без TCP bind, поэтому routes тестируются через `app.request()`. `startServe(config, project)` добавляет rebuild, static assets, watcher и loopback HTTP lifecycle. Resolved project передаётся отдельно от config, поэтому custom memory directory не принимается за project root.

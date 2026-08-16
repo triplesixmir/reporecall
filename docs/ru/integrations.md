@@ -8,9 +8,21 @@
 reporecall mcp
 ```
 
-Доступны `memory_get_context`, `memory_search`, `memory_get_recent`, `memory_remember`, `memory_update`, `memory_resolve`, `memory_checkpoint` и `memory_review_inbox`. Каждый ответ содержит structured content и короткое summary.
+Доступны `memory_get_context`, `memory_search`, `memory_get_recent`, `memory_auto_capture`, `memory_remember`, `memory_update`, `memory_resolve`, `memory_checkpoint`, `memory_process` и `memory_review_inbox`. Каждый ответ содержит structured content и короткое summary.
 
 MCP writes используют те же canonical stores и secret redaction, что CLI. Agent может добавить AI tags, но user-owned tags сохраняются. Durable session event требует явного `memory_checkpoint`.
+
+`memory_auto_capture` — основной Codex agent-native path. После meaningful-задачи
+managed instructions просят agent передать короткий redacted summary и массив
+structured candidates в `memories`. Explicit candidates становятся durable
+Markdown records и сразу индексируются; provider suggestions продолжают
+следовать настроенному processor mode. Для trivial turns tool вызывать не нужно.
+
+`memory_process` остаётся lower-level processor workflow для явно переданной
+redacted capture и возвращает durable records, Inbox suggestions, duplicates,
+warnings, provider и mode. Ни один из этих tools не читает и не сохраняет
+transcript files. Durable session event по-прежнему требует явного
+`memory_checkpoint`.
 
 ## Codex
 
@@ -23,7 +35,7 @@ reporecall codex install --scope project
 ```
 
 - `codex mcp add` регистрирует local stdio server;
-- managed `AGENTS.md` block объясняет source-of-truth и privacy semantics;
+- managed `AGENTS.md` block объясняет source-of-truth, privacy, automatic capture и recall semantics;
 - managed `hooks.json` inject-ит context на `SessionStart` и `PostCompact`, lifecycle marker — на `SessionEnd`;
 - unrelated user text и hook handlers сохраняются.
 
@@ -32,6 +44,17 @@ reporecall codex install --scope project
 
 Hook fail-open. Если index или context builder недоступен, session продолжается, а hook пишет diagnostic, не блокируя agent.
 
+После одноразовой установки project setup происходит автоматически. На
+`SessionStart` или `PostCompact` RepoRecall находит Git root, при необходимости
+создаёт project manifest и canonical scope directories, пересобирает disposable
+index и inject-ит context со stable project ID. Git remote сохраняет один ID для
+разных clone; local-only project сохраняет UUID в `project.md`. Raw remote,
+machine path и transcript в manifest не записываются.
+
+`SessionStart` и `PostCompact` — automatic recall path. Agent-native capture не
+разбирает и не сохраняет Codex transcript, поэтому не зависит от нестабильного
+формата transcript.
+
 ## Processors
 
 Processor kinds: `disabled`, `agent-native`, `ollama`, `openrouter`, `openai-compatible`. HTTP providers используют единый typed contract и environment credentials. Modes:
@@ -39,6 +62,10 @@ Processor kinds: `disabled`, `agent-native`, `ollama`, `openrouter`, `openai-com
 - `conservative`: explicit records durable, provider suggestions в Inbox;
 - `balanced`: high-confidence suggestions могут стать durable;
 - `automatic`: opt-in persistence, никогда не default.
+
+CLI-эквивалент — `reporecall process --content "..."` или
+`reporecall process --json < capture.json`. Оба entry point используют одинаковые
+redaction, duplicate и Inbox rules.
 
 Duplicate detection использует normalized content, type и project identity до processor-assisted relations.
 

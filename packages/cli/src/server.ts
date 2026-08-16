@@ -23,7 +23,6 @@ import {
   type MemoryFilters,
   type MemoryRecord,
   type MemoryRelation,
-  type MemoryScope,
   type MemorySourceRoot,
   type MemoryTag,
   type ProjectRef,
@@ -32,8 +31,13 @@ import {
 } from '@reporecall/core';
 import { SqliteMemoryIndex } from '@reporecall/index';
 import { FileInboxStore } from '@reporecall/processors';
-import { FileMemoryStore } from '@reporecall/storage';
+import {
+  FileMemoryStore,
+  FileProjectRegistry,
+  type ProjectRegistration,
+} from '@reporecall/storage';
 import { type RepoRecallConfig } from './config.js';
+import type { ResolvedProject } from './project.js';
 
 type JsonObject = Record<string, unknown>;
 type ApiStatus = 400 | 404 | 409 | 500;
@@ -50,10 +54,12 @@ export type ServeRuntime = {
     global: FileInboxStore;
     project: FileInboxStore;
   };
+  readonly projectEntries: readonly ProjectStoreEntry[];
   readonly index: SqliteMemoryIndex;
   readonly sources: MemorySourceRoot[];
   rebuild(): Promise<RebuildReport>;
   update(paths: string[]): Promise<IndexReport>;
+  refreshProjects(): Promise<void>;
   close(): void;
 };
 
@@ -86,6 +92,14 @@ export type MemoryWatcherOptions = {
   onPaths(paths: string[]): Promise<void>;
   debounceMs?: number;
   onError?: (error: unknown) => void;
+};
+
+export type ProjectStoreEntry = {
+  project: ProjectRef;
+  memoryDir: string;
+  store: FileMemoryStore;
+  sessionStore: FileMemoryStore;
+  inboxStore: FileInboxStore;
 };
 
 class ApiError extends Error {
@@ -314,26 +328,118 @@ function projectFromConfig(config: RepoRecallConfig): ProjectRef {
   return { id, root: projectRoot, name };
 }
 
-function storeForScope(runtime: ServeRuntime, scope: MemoryScope): FileMemoryStore {
-  if (scope === 'global') return runtime.stores.global;
-  if (scope === 'session') return runtime.stores.session;
-  return runtime.stores.project;
+function projectReference(project: ResolvedProject): ProjectRef {
+  return { id: project.id, root: project.root, name: project.name };
 }
 
-function rootForScope(runtime: ServeRuntime, scope: MemoryScope): string {
-  return scope === 'global' ? runtime.config.brainPath : runtime.config.projectMemoryDir;
+function projectMatches(candidate: ProjectRef, registered: ProjectRef): boolean {
+  return (
+    candidate.id === registered.id ||
+    candidate.root === registered.root ||
+    candidate.id === registered.root ||
+    candidate.root === registered.id
+  );
 }
 
-function memoryPath(runtime: ServeRuntime, record: Pick<MemoryRecord, 'id' | 'scope'>): string {
+function canonicalProject(runtime: ServeRuntime, project: ProjectRef | undefined): ProjectRef | undefined {
+  if (project === undefined) return undefined;
+  const registered = runtime.projectEntries.find((entry) => projectMatches(project, entry.project));
+  return registered?.project ?? project;
+}
+
+function canonicalRecord(runtime: ServeRuntime, record: MemoryRecord): MemoryRecord {
+  const project = canonicalProject(runtime, record.project);
+  if (project === undefined || project === record.project) return record;
+  return { ...record, project };
+}
+
+function matchesProjectFilters(record: MemoryRecord, filters: MemoryFilters): boolean {
+  if (filters.projectId !== undefined && record.project?.id !== filters.projectId) return false;
+  if (filters.projectIds !== undefined && !filters.projectIds.includes(record.project?.id ?? '')) {
+    return false;
+  }
+  return true;
+}
+
+type MemoryStoreEntry = {
+  store: FileMemoryStore;
+  root: string;
+  project?: ProjectRef;
+};
+
+function currentProjectEntry(runtime: ServeRuntime): ProjectStoreEntry {
+  const entry =
+    runtime.projectEntries.find((entry) => entry.project.id === runtime.project.id) ??
+    runtime.projectEntries[0];
+  if (entry === undefined) {
+    throw new ApiError(500, 'RepoRecall has no registered project store.');
+  }
+  return entry;
+}
+
+function projectEntryFor(
+  runtime: ServeRuntime,
+  project?: ProjectRef,
+): ProjectStoreEntry {
+  if (project?.id !== undefined) {
+    const byId = runtime.projectEntries.find((entry) => entry.project.id === project.id);
+    if (byId !== undefined) return byId;
+  }
+  if (project?.root !== undefined) {
+    const byRoot = runtime.projectEntries.find((entry) => entry.project.root === project.root);
+    if (byRoot !== undefined) return byRoot;
+  }
+  if (project !== undefined) {
+    throw new ApiError(400, `Project "${project.id}" is not registered on this machine.`);
+  }
+  return currentProjectEntry(runtime);
+}
+
+function memoryEntryFor(
+  runtime: ServeRuntime,
+  record: Pick<MemoryRecord, 'scope' | 'project'>,
+  fallback?: MemoryStoreEntry,
+): MemoryStoreEntry {
+  if (record.scope === 'global') {
+    return { store: runtime.stores.global, root: runtime.config.brainPath };
+  }
+  if (record.scope === 'session' && fallback?.store === runtime.stores.session) return fallback;
+  if (record.scope === 'project' && fallback?.store === runtime.stores.project) return fallback;
+  const entry = projectEntryFor(runtime, record.project);
+  return {
+    store: record.scope === 'session' ? entry.sessionStore : entry.store,
+    root: entry.memoryDir,
+    project: entry.project,
+  };
+}
+
+function memoryPath(root: string, record: Pick<MemoryRecord, 'id' | 'scope'>): string {
   return join(
-    rootForScope(runtime, record.scope),
+    root,
     record.scope === 'session' ? 'sessions' : 'memories',
     `${record.id}.md`,
   );
 }
 
+function memoryStoreEntries(runtime: ServeRuntime): MemoryStoreEntry[] {
+  return [
+    { store: runtime.stores.global, root: runtime.config.brainPath },
+    ...runtime.projectEntries.flatMap((entry) => [
+      { store: entry.store, root: entry.memoryDir, project: entry.project },
+      { store: entry.sessionStore, root: entry.memoryDir, project: entry.project },
+    ]),
+  ];
+}
+
 function memoryStores(runtime: ServeRuntime): FileMemoryStore[] {
-  return [...new Set([runtime.stores.global, runtime.stores.project, runtime.stores.session])];
+  return [...new Set(memoryStoreEntries(runtime).map((entry) => entry.store))];
+}
+
+function inboxStores(runtime: ServeRuntime): FileInboxStore[] {
+  return [
+    runtime.inboxStores.global,
+    ...runtime.projectEntries.map((entry) => entry.inboxStore),
+  ].filter((store, index, stores) => stores.indexOf(store) === index);
 }
 
 async function listMemories(
@@ -342,10 +448,15 @@ async function listMemories(
 ): Promise<MemoryRecord[]> {
   const withoutLimit: MemoryFilters = { ...filters };
   delete withoutLimit.limit;
+  delete withoutLimit.projectId;
+  delete withoutLimit.projectIds;
   const records = (
     await Promise.all(memoryStores(runtime).map((store) => store.list(withoutLimit)))
   ).flat();
-  const unique = new Map(records.map((record) => [record.id, record]));
+  const normalized = records
+    .map((record) => canonicalRecord(runtime, record))
+    .filter((record) => matchesProjectFilters(record, filters));
+  const unique = new Map(normalized.map((record) => [record.id, record]));
   const sorted = [...unique.values()].sort((left, right) => {
     if (right.updatedAt !== left.updatedAt) return right.updatedAt.localeCompare(left.updatedAt);
     return left.id.localeCompare(right.id);
@@ -356,10 +467,10 @@ async function listMemories(
 async function findMemory(
   runtime: ServeRuntime,
   id: string,
-): Promise<{ record: MemoryRecord; store: FileMemoryStore } | null> {
-  for (const store of memoryStores(runtime)) {
-    const record = await store.get(id);
-    if (record !== null) return { record, store };
+): Promise<{ record: MemoryRecord; store: FileMemoryStore; root: string; project?: ProjectRef } | null> {
+  for (const entry of memoryStoreEntries(runtime)) {
+    const record = await entry.store.get(id);
+    if (record !== null) return { record: canonicalRecord(runtime, record), ...entry };
   }
   return null;
 }
@@ -423,9 +534,7 @@ async function readJsonObject(request: Request): Promise<JsonObject> {
 
 async function pendingInbox(runtime: ServeRuntime): Promise<InboxItem[]> {
   const items = (
-    await Promise.all(
-      Object.values(runtime.inboxStores).map((store) => store.list({ status: 'pending' })),
-    )
+    await Promise.all(inboxStores(runtime).map((store) => store.list({ status: 'pending' })))
   ).flat();
   return items.sort((left, right) => {
     if (right.updatedAt !== left.updatedAt) return right.updatedAt.localeCompare(left.updatedAt);
@@ -440,9 +549,7 @@ async function allInbox(
 ): Promise<InboxItem[]> {
   const items = (
     await Promise.all(
-      Object.values(runtime.inboxStores).map((store) =>
-        status === 'all' ? store.list() : store.list({ status }),
-      ),
+      inboxStores(runtime).map((store) => status === 'all' ? store.list() : store.list({ status })),
     )
   ).flat();
   const sorted = items.sort((left, right) => {
@@ -456,7 +563,7 @@ async function findInbox(
   runtime: ServeRuntime,
   id: string,
 ): Promise<{ item: InboxItem; store: FileInboxStore } | null> {
-  for (const store of Object.values(runtime.inboxStores)) {
+  for (const store of inboxStores(runtime)) {
     const item = await store.get(id);
     if (item !== null) return { item, store };
   }
@@ -476,38 +583,126 @@ function notFound(message: string): never {
   throw new ApiError(404, message);
 }
 
-export function createServeRuntime(config: RepoRecallConfig): ServeRuntime {
-  const project = projectFromConfig(config);
+function projectEntry(project: ProjectRef, memoryDir: string): ProjectStoreEntry {
+  return {
+    project,
+    memoryDir,
+    store: new FileMemoryStore({ root: memoryDir, scope: 'project' }),
+    sessionStore: new FileMemoryStore({ root: memoryDir, scope: 'session' }),
+    inboxStore: new FileInboxStore({ root: memoryDir }),
+  };
+}
+
+function registeredProjectEntries(
+  project: ProjectRef,
+  currentEntry: ProjectStoreEntry,
+  registrations: readonly ProjectRegistration[],
+): ProjectStoreEntry[] {
+  const entries: ProjectStoreEntry[] = [currentEntry];
+  for (const registration of registrations) {
+    if (
+      registration.id === project.id ||
+      resolve(registration.memoryDir) === resolve(currentEntry.memoryDir)
+    ) {
+      continue;
+    }
+    entries.push(
+      projectEntry(
+        { id: registration.id, root: registration.root, name: registration.name },
+        registration.memoryDir,
+      ),
+    );
+  }
+  return entries;
+}
+
+function sourceRoots(
+  brainPath: string,
+  entries: readonly ProjectStoreEntry[],
+): MemorySourceRoot[] {
+  return [
+    { root: brainPath, scope: 'global' },
+    ...entries.flatMap((entry) => [
+      { root: entry.memoryDir, scope: 'project' as const, project: entry.project },
+      { root: entry.memoryDir, scope: 'session' as const, project: entry.project },
+    ]),
+  ];
+}
+
+function registrationSignature(registrations: readonly ProjectRegistration[]): string {
+  return registrations
+    .map((registration) => `${registration.id}\u0000${registration.memoryDir}\u0000${registration.lastSeenAt}`)
+    .sort()
+    .join('\u0001');
+}
+
+export function createServeRuntime(
+  config: RepoRecallConfig,
+  resolvedProject?: ResolvedProject,
+  registeredProjects: readonly ProjectRegistration[] = [],
+): ServeRuntime {
+  const project = resolvedProject === undefined ? projectFromConfig(config) : projectReference(resolvedProject);
+  const currentEntry = projectEntry(project, config.projectMemoryDir);
+  const projectEntries = registeredProjectEntries(project, currentEntry, registeredProjects);
   const stores = {
     global: new FileMemoryStore({ root: config.brainPath, scope: 'global' }),
-    project: new FileMemoryStore({ root: config.projectMemoryDir, scope: 'project' }),
-    session: new FileMemoryStore({ root: config.projectMemoryDir, scope: 'session' }),
+    project: currentEntry.store,
+    session: currentEntry.sessionStore,
   };
   const inboxStores = {
     global: new FileInboxStore({ root: config.brainPath }),
-    project: new FileInboxStore({ root: config.projectMemoryDir }),
+    project: currentEntry.inboxStore,
   };
   const index = new SqliteMemoryIndex({ path: config.indexPath });
-  const sources: MemorySourceRoot[] = [
-    { root: config.brainPath, scope: 'global' },
-    { root: config.projectMemoryDir, scope: 'project', project },
-    { root: config.projectMemoryDir, scope: 'session', project },
-  ];
+  const sources = sourceRoots(config.brainPath, projectEntries);
+  let projectsSignature = registrationSignature(registeredProjects);
+  let refreshInFlight: Promise<void> | undefined;
+  const refreshProjects = async (): Promise<void> => {
+    if (refreshInFlight !== undefined) return refreshInFlight;
+    refreshInFlight = (async () => {
+      let latest: ProjectRegistration[];
+      try {
+        latest = await new FileProjectRegistry({ brainPath: config.brainPath }).list();
+      } catch {
+        return;
+      }
+      const nextSignature = registrationSignature(latest);
+      if (nextSignature === projectsSignature) return;
+      projectEntries.splice(
+        0,
+        projectEntries.length,
+        ...registeredProjectEntries(project, currentEntry, latest),
+      );
+      sources.splice(0, sources.length, ...sourceRoots(config.brainPath, projectEntries));
+      projectsSignature = nextSignature;
+      await index.rebuild(sources);
+    })().finally(() => {
+      refreshInFlight = undefined;
+    });
+    return refreshInFlight;
+  };
   return {
     config,
     project,
     stores,
     inboxStores,
+    projectEntries,
     index,
     sources,
     rebuild: () => index.rebuild(sources),
     update: (paths) => index.update(paths),
+    refreshProjects,
     close: () => index.close(),
   };
 }
 
 export function createApiApp(runtime: ServeRuntime): Hono {
   const app = new Hono();
+
+  app.use('/api/*', async (_context: Context, next) => {
+    await runtime.refreshProjects();
+    await next();
+  });
 
   app.get('/api/health', async (context: Context) =>
     context.json({
@@ -519,7 +714,12 @@ export function createApiApp(runtime: ServeRuntime): Hono {
 
   app.get('/api/overview', async (context: Context) => {
     const records = await listMemories(runtime);
-    const projects = new Set(records.map((record) => record.project?.id).filter(Boolean));
+    const projects = new Set(
+      [
+        ...runtime.projectEntries.map((entry) => entry.project.id),
+        ...records.map((record) => record.project?.id).filter(Boolean),
+      ],
+    );
     const tags = new Set(records.flatMap((record) => record.tags.map((tag) => tag.name)));
     const activeCount = records.filter((record) => record.status === 'active').length;
     const inbox = await pendingInbox(runtime);
@@ -536,7 +736,12 @@ export function createApiApp(runtime: ServeRuntime): Hono {
   app.get('/api/memories', async (context: Context) => {
     const { filters, query } = filtersFromUrl(new URL(context.req.url));
     if (query !== undefined) {
-      const results = await runtime.index.search({ query, ...filters });
+      const searchFilters: MemoryFilters = { ...filters };
+      delete searchFilters.projectId;
+      delete searchFilters.projectIds;
+      const results = (await runtime.index.search({ query, ...searchFilters }))
+        .map((result) => ({ ...result, record: canonicalRecord(runtime, result.record) }))
+        .filter((result) => matchesProjectFilters(result.record, filters));
       return context.json({
         memories: results.map((result) => result.record),
         results,
@@ -559,8 +764,9 @@ export function createApiApp(runtime: ServeRuntime): Hono {
       runtime,
       'api',
     );
-    const record = await storeForScope(runtime, input.scope).create(input);
-    await runtime.update([memoryPath(runtime, record)]);
+    const target = memoryEntryFor(runtime, input);
+    const record = await target.store.create(input);
+    await runtime.update([memoryPath(target.root, record)]);
     return context.json({ memory: record, warnings }, 201);
   });
 
@@ -569,10 +775,10 @@ export function createApiApp(runtime: ServeRuntime): Hono {
     if (found === null) notFound('Memory not found.');
     const { patch, warnings } = parsePatchInput(await readJsonObject(context.req.raw), runtime);
     const updated = updateMemoryRecord(found.record, patch, { actor: 'user' });
-    const targetStore = storeForScope(runtime, updated.scope);
-    const oldPath = memoryPath(runtime, found.record);
-    const newPath = memoryPath(runtime, updated);
-    await targetStore.writeRecord(updated);
+    const target = memoryEntryFor(runtime, updated, found);
+    const oldPath = memoryPath(found.root, found.record);
+    const newPath = memoryPath(target.root, updated);
+    await target.store.writeRecord(updated);
     if (oldPath !== newPath) await found.store.remove(found.record.id);
     await runtime.update([...new Set([oldPath, newPath])]);
     return context.json({ memory: updated, warnings });
@@ -581,7 +787,7 @@ export function createApiApp(runtime: ServeRuntime): Hono {
   app.delete('/api/memories/:id', async (context: Context) => {
     const found = await findMemory(runtime, requiredString(context.req.param('id'), 'id'));
     if (found === null) notFound('Memory not found.');
-    const path = memoryPath(runtime, found.record);
+    const path = memoryPath(found.root, found.record);
     await found.store.remove(found.record.id);
     await runtime.update([path]);
     return context.json({ deleted: found.record.id });
@@ -595,11 +801,27 @@ export function createApiApp(runtime: ServeRuntime): Hono {
 
   app.get('/api/projects', async (context: Context) => {
     const records = await listMemories(runtime);
-    const projects = new Map<string, ProjectRef>();
+    const inbox = await pendingInbox(runtime);
+    const projects = new Map<string, ProjectRef>(
+      runtime.projectEntries.map((entry) => [entry.project.id, entry.project]),
+    );
     for (const record of records) {
       if (record.project !== undefined) projects.set(record.project.id, record.project);
     }
-    const values = [...projects.values()].sort((left, right) => left.id.localeCompare(right.id));
+    projects.set(runtime.project.id, runtime.project);
+    const values = [...projects.values()]
+      .map((project) => {
+        const projectRecords = records.filter((record) => record.project?.id === project.id);
+        return {
+          ...project,
+          memoryCount: projectRecords.length,
+          activeCount: projectRecords.filter((record) => record.status === 'active').length,
+          inboxCount: inbox.filter((item) => item.suggested.project?.id === project.id).length,
+          current: project.id === runtime.project.id,
+          ready: true,
+        };
+      })
+      .sort((left, right) => left.id.localeCompare(right.id));
     return context.json({ projects: values, count: values.length });
   });
 
@@ -646,9 +868,10 @@ export function createApiApp(runtime: ServeRuntime): Hono {
     const payload: JsonObject = { ...found.item.suggested, ...body };
     if (body.scope === 'global' && !hasOwn(body, 'project')) delete payload.project;
     const { input, warnings } = parseCreateInput(payload, runtime, 'inbox-accept');
-    const record = await storeForScope(runtime, input.scope).create(input);
+    const target = memoryEntryFor(runtime, input);
+    const record = await target.store.create(input);
     const item = await found.store.update(found.item.id, { status: 'accepted' });
-    await runtime.update([memoryPath(runtime, record)]);
+    await runtime.update([memoryPath(target.root, record)]);
     return context.json({ item, memory: record, warnings }, 201);
   });
 
@@ -671,7 +894,9 @@ export function createApiApp(runtime: ServeRuntime): Hono {
     const records =
       query === undefined
         ? await listMemories(runtime, filters)
-        : (await runtime.index.search({ query, ...filters })).map((result) => result.record);
+        : (await runtime.index.search({ query, ...filters })).map((result) =>
+            canonicalRecord(runtime, result.record),
+          );
     const nodes = records.map((record) => ({
       id: record.id,
       label: record.content.slice(0, 120),
@@ -849,11 +1074,28 @@ async function closeServer(server: ServerType): Promise<void> {
   });
 }
 
+export function startServe(
+  config: RepoRecallConfig,
+  options?: ServeOptions,
+): Promise<ServeHandle>;
+export function startServe(
+  config: RepoRecallConfig,
+  project: ResolvedProject,
+  options?: ServeOptions,
+): Promise<ServeHandle>;
 export async function startServe(
   config: RepoRecallConfig,
-  options: ServeOptions = {},
+  projectOrOptions: ResolvedProject | ServeOptions = {},
+  providedOptions: ServeOptions = {},
 ): Promise<ServeHandle> {
-  const runtime = createServeRuntime(config);
+  const resolvedProject = 'manifestPath' in projectOrOptions ? projectOrOptions : undefined;
+  const options: ServeOptions = resolvedProject === undefined
+    ? projectOrOptions as ServeOptions
+    : providedOptions;
+  const registeredProjects = await new FileProjectRegistry({ brainPath: config.brainPath })
+    .list()
+    .catch(() => [] as ProjectRegistration[]);
+  const runtime = createServeRuntime(config, resolvedProject, registeredProjects);
   let watcher: MemoryWatcher | undefined;
   let server: ServerType | undefined;
   try {

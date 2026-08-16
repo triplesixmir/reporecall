@@ -43,7 +43,12 @@ function textRelevance(record: MemoryRecord, query: string | undefined): number 
 }
 
 function scopeMatch(record: MemoryRecord, request: ContextRequest): number {
-  if (request.project?.id !== undefined && record.project?.id === request.project.id) return 1;
+  const projectIds = request.project === undefined
+    ? []
+    : [request.project.id, ...(request.projectAliases ?? [])];
+  if (projectIds.length > 0 && record.project?.id !== undefined && projectIds.includes(record.project.id)) {
+    return 1;
+  }
   if (request.workspace?.id !== undefined && record.workspace?.id === request.workspace.id) return 1;
   if (request.project === undefined && request.workspace === undefined && record.scope === 'global') return 1;
   return 0;
@@ -107,7 +112,11 @@ export class DeterministicContextBuilder implements ContextBuilder {
     for (const result of results) {
       const record = result.record;
       if (EXCLUDED_STATUSES.has(record.status) || !allowedScopes.has(record.scope)) continue;
-      const currentProject = request.project?.id !== undefined && record.project?.id === request.project.id;
+      const projectIds = request.project === undefined
+        ? []
+        : [request.project.id, ...(request.projectAliases ?? [])];
+      const currentProject =
+        projectIds.length > 0 && record.project?.id !== undefined && projectIds.includes(record.project.id);
       const currentWorkspace = request.workspace?.id !== undefined && record.workspace?.id === request.workspace.id;
       const mandatory = record.pinned || currentProject || currentWorkspace;
       const score =

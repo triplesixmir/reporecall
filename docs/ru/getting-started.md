@@ -11,19 +11,22 @@ pnpm check
 
 `pnpm check` запускает ESLint, strict TypeScript, Vitest и build всех workspace. `pnpm test:e2e` собирает Web UI, запускает локальный Vite preview и выполняет browser smoke tests.
 
-## 2. Инициализация проекта
+## 2. Инициализация brain и подключение Codex
 
-Из директории репозитория:
+Из директории репозитория явная инициализация всё ещё доступна:
 
 ```bash
 pnpm exec tsx packages/cli/src/bin.ts init --yes
 ```
 
-Команда idempotent. Она создаёт `.reporecall/`, config и managed block в `AGENTS.md`, сохраняя текст вне block. Для custom global brain используйте `--brain /absolute/path`. `reporecall brain init --brain /absolute/path` инициализирует только brain.
+Команда idempotent. Она создаёт project manifest и `.reporecall/`, config и
+managed block в `AGENTS.md`, сохраняя текст вне block. Для custom global brain
+используйте `--brain /absolute/path`. `reporecall brain init --brain
+/absolute/path` инициализирует только brain.
 
 Инициализация работает и в non-Git directory. Git нужен для синхронизации project Markdown, но не является требованием storage layer.
 
-После установки CLI подключите Codex:
+После установки CLI один раз подключите Codex для текущего пользователя:
 
 ```bash
 reporecall codex install --scope user
@@ -33,6 +36,23 @@ reporecall doctor
 После этого Codex получает актуальный context при старте сессии и после
 compaction. Transcript не превращается в durable memory молча: для сохранения
 используйте явные `remember` или `checkpoint`.
+
+После установки per-project `init` не требуется. Когда Codex стартует в новой
+папке, RepoRecall находит Git root и создаёт:
+
+```text
+<project-root>/.reporecall/
+  project.md
+  memories/
+  inbox/
+  sessions/
+  config.toml
+```
+
+`project.md` содержит только versioned project metadata. Git remote даёт один
+stable project ID для разных clone, а local-only проект сохраняет UUID в
+manifest. Повторный вход использует существующий manifest и не переписывает
+его.
 
 ## 3. Создание и поиск memory
 

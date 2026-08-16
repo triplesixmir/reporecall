@@ -55,6 +55,24 @@ Writes use a temporary file and rename. A scope update relocates the record betw
 
 Project canonical Markdown is intentionally trackable in Git. The generated SQLite file, cache, and runtime markers are ignored; private project memories still require review and a private remote.
 
+## Automatic project bootstrap
+
+The CLI resolves the Git top-level directory before project-aware work. A
+missing `<project-root>/.reporecall/project.md` is created atomically on
+`SessionStart`, `PostCompact`, `mcp`, `serve`, and project-aware CLI commands.
+The manifest is separate from memory files and is never indexed as a memory.
+
+For a repository with a remote, the project ID is `proj_git_<sha256>` from a
+normalized host/path fingerprint. SSH and HTTPS forms for the same remote map to
+the same ID. Without a remote, RepoRecall creates `proj_local_<uuid>` once and
+persists it in the manifest. The raw remote, absolute root, credentials, and
+transcripts are not written to the file. Existing basename-based memory IDs are
+treated as runtime aliases so older Markdown remains discoverable.
+
+`SessionEnd` is read-only with respect to project bootstrap: it writes a
+lifecycle marker only when the project manifest already exists. All other hook
+failures are fail-open.
+
 ## Index lifecycle
 
 `SqliteMemoryIndex.rebuild()` enumerates configured canonical roots, clears derived tables, parses every Markdown record, and recreates FTS5, metadata, tags, relations, file hashes, and error rows. `update(paths)` handles manual edits, atomic rename events, and deletions. Index errors remain inspectable and never modify the source file.

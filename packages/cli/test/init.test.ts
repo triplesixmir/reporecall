@@ -32,11 +32,19 @@ describe('initialization', () => {
 
     expect(first.managedBlockAdded).toBe(true);
     expect(second.managedBlockAdded).toBe(false);
+    expect(first.projectId).toMatch(/^proj_local_/u);
+    expect(second.projectId).toBe(first.projectId);
+    expect(second.manifestPath).toBe(first.manifestPath);
+    await expect(readFile(first.manifestPath ?? '', 'utf8')).resolves.toContain('kind: project');
     expect(beginCount).toBe(1);
     expect(agents).toContain('# Existing guidance');
     expect(agents).toContain('Keep this text.');
     expect(agents).toContain('Canonical memory files are Markdown');
-    await expect(readFile(join(project, '.reporecall', 'config.toml'), 'utf8')).resolves.toContain('brain_path');
+    expect(agents).toContain('memory_auto_capture');
+    expect(agents).toContain('meaningful task');
+    await expect(readFile(join(project, '.reporecall', 'config.toml'), 'utf8')).resolves.toContain(
+      'brain_path',
+    );
     await expect(readdir(join(brain, 'memories'))).resolves.toEqual([]);
   });
 
@@ -47,6 +55,8 @@ describe('initialization', () => {
     const report = await initializeBrain({ brainPath: brain });
 
     expect(report.brainPath).toBe(brain);
-    await expect(readFile(join(brain, '.reporecall', 'config.toml'), 'utf8')).resolves.toContain('processor');
+    await expect(readFile(join(brain, '.reporecall', 'config.toml'), 'utf8')).resolves.toContain(
+      'processor',
+    );
   });
 });

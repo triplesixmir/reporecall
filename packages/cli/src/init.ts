@@ -1,18 +1,17 @@
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
+import {
+  REPORECALL_BEGIN_MARKER,
+  REPORECALL_END_MARKER,
+  REPORECALL_MANAGED_BLOCK,
+} from '@reporecall/integrations';
 import { stringifyConfig } from './config.js';
+import { discoverProject, ensureProject } from './project.js';
 
-const BEGIN_MARKER = '<!-- BEGIN REPORECALL MANAGED BLOCK -->';
-const END_MARKER = '<!-- END REPORECALL MANAGED BLOCK -->';
-
-const MANAGED_BLOCK = `${BEGIN_MARKER}
-## RepoRecall memory
-
-Canonical memory files are Markdown with YAML frontmatter and are the durable source of truth. SQLite is only a rebuildable local index. Do not store secrets, credentials, private keys, or raw transcripts in memory files.
-
-Use RepoRecall MCP tools or the local CLI for memory operations. Durable session summaries are created only after an explicit checkpoint.
-${END_MARKER}`;
+const BEGIN_MARKER = REPORECALL_BEGIN_MARKER;
+const END_MARKER = REPORECALL_END_MARKER;
+const MANAGED_BLOCK = REPORECALL_MANAGED_BLOCK;
 
 export type InitializeOptions = {
   cwd?: string;
@@ -24,6 +23,8 @@ export type InitializeOptions = {
 
 export type InitializeReport = {
   projectRoot?: string;
+  projectId?: string;
+  manifestPath?: string;
   brainPath: string;
   configPath: string;
   agentsPath?: string;
@@ -65,7 +66,10 @@ function mergeManagedBlock(existing: string): { content: string; added: boolean 
   }
   if (begin !== -1 && end !== -1) {
     const endExclusive = end + END_MARKER.length;
-    return { content: `${existing.slice(0, begin)}${MANAGED_BLOCK}${existing.slice(endExclusive)}`, added: false };
+    return {
+      content: `${existing.slice(0, begin)}${MANAGED_BLOCK}${existing.slice(endExclusive)}`,
+      added: false,
+    };
   }
   const separator = existing.length === 0 || existing.endsWith('\n') ? '' : '\n';
   return { content: `${existing}${separator}\n${MANAGED_BLOCK}\n`, added: true };
@@ -89,30 +93,34 @@ export async function initializeBrain(options: { brainPath: string }): Promise<I
   const configRoot = join(brainPath, '.reporecall');
   await mkdir(configRoot, { recursive: true });
   const configPath = join(configRoot, 'config.toml');
-  await writeIfMissing(configPath, stringifyConfig({ processor: 'disabled', processorMode: 'conservative' }));
+  await writeIfMissing(
+    configPath,
+    stringifyConfig({ processor: 'disabled', processorMode: 'conservative' }),
+  );
   return { brainPath, configPath, managedBlockAdded: false, createdDirectories };
 }
 
 export async function initializeProject(options: InitializeOptions): Promise<InitializeReport> {
-  const projectRoot = resolve(options.cwd ?? process.cwd());
-  const projectMemoryDir = resolve(options.projectMemoryDir ?? join(projectRoot, '.reporecall'));
+  const discovered = await discoverProject(resolve(options.cwd ?? process.cwd()));
+  const projectRoot = discovered.root;
   const brain = await initializeBrain({ brainPath: options.brainPath });
-  const createdDirectories = await ensureMemoryDirectories(projectMemoryDir);
-  const configPath = join(projectMemoryDir, 'config.toml');
-  await writeIfMissing(
-    configPath,
-    stringifyConfig({
+  const project = await ensureProject(projectRoot, options.projectMemoryDir, {
+    projectConfig: stringifyConfig({
       brainPath: options.brainConfigPath ?? '~/.reporecall/brain',
       indexPath: 'index.sqlite',
       processor: 'disabled',
       processorMode: 'conservative',
     }),
-  );
+  });
+  const createdDirectories = await ensureMemoryDirectories(project.memoryDir);
+  const configPath = join(project.memoryDir, 'config.toml');
   const agentsPath = resolve(options.agentsPath ?? join(projectRoot, 'AGENTS.md'));
   await mkdir(dirname(agentsPath), { recursive: true });
   const agents = await updateAgents(agentsPath);
   return {
     projectRoot,
+    projectId: project.id,
+    manifestPath: project.manifestPath,
     brainPath: brain.brainPath,
     configPath,
     agentsPath,
